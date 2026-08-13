@@ -149,10 +149,10 @@ async def ping(interaction: discord.Interaction):
 
 @bot.tree.command(name="updatelogs", description="View Herald's latest update logs and patch notes.")
 async def updatelogs(interaction: discord.Interaction):
-    embed = discord.Embed(title="Herald Patch Notes - Version 1.6", color=discord.Color.blue())
+    embed = discord.Embed(title="Herald Patch Notes - Version 1.65", color=discord.Color.blue())
+    embed.add_field(name="💬 Selective Chat Listener (V 1.65)", value="• Herald now only responds when directly pinged, replied to, or mentioned by name.\n• Fixed cross-reply triggers so Herald won't interfere in other users' conversations.", inline=False)
     embed.add_field(name="🎮 Game Hub (V 1.5)", value="• Added `/gamehub` supporting up to 8 players.\n• Features 15 mini-games including RPS, Tic-Tac-Toe, Stacking, Slots, Trivia, and Math!", inline=False)
     embed.add_field(name="📩 Feedback System (V 1.6)", value="• Added `/feedback` command to send ideas or bug reports directly to Skide.\n• Integrated AI content moderation to automatically filter out spam.", inline=False)
-    embed.add_field(name="⚡ Utility & Performance", value="• Added `/ping` to monitor connection latency.\n• Added `/updatelogs` to view update history.\n• Synchronized persistent conversation memory directly via Discord channels.", inline=False)
     await interaction.response.send_message(embed=embed)
 
 @bot.tree.command(name="feedback", description="Submit feedback or report a bug directly to Skide.")
@@ -497,7 +497,23 @@ async def on_message(message):
 
     await bot.process_commands(message)
 
-    if message.reference or bot.user.mentioned_in(message) or isinstance(message.channel, discord.DMChannel):
+    # Trigger Conditions Check
+    is_reply_to_herald = False
+    if message.reference:
+        if isinstance(message.reference.resolved, discord.Message):
+            is_reply_to_herald = (message.reference.resolved.author == bot.user)
+        else:
+            try:
+                ref_msg = await message.channel.fetch_message(message.reference.message_id)
+                is_reply_to_herald = (ref_msg.author == bot.user)
+            except Exception:
+                is_reply_to_herald = False
+
+    is_mentioned = bot.user.mentioned_in(message)
+    is_about_herald = "herald" in message.content.lower()
+    is_dm = isinstance(message.channel, discord.DMChannel)
+
+    if is_reply_to_herald or is_mentioned or is_about_herald or is_dm:
         user_id = str(message.author.id)
         history = await load_memory(user_id)
         limit_reached = False
