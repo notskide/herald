@@ -394,25 +394,36 @@ async def on_message(message):
     if message.author.bot:
         return
 
-    if str(message.author.id) in banned_users:
+    if message.author.id not in SUPER_USERS and str(message.author.id) in banned_users:
         return
 
     if isinstance(message.channel, discord.DMChannel) and message.author.id in SUPER_USERS:
         content = message.content.strip()
         if content.startswith("ban "):
-            target = content.split(" ")[1]
+            target = content.split(" ")[1].strip()
+            
+            if target == str(message.author.id):
+                await message.reply("gng, why are you banning yourself.")
+                return
+                
+            if target in [str(uid) for uid in SUPER_USERS]:
+                await message.reply("you cannot ban a super user, they are immune.")
+                return
+                
             if target not in banned_users:
                 banned_users.append(target)
                 save_list(BANNED_USERS_FILE, banned_users)
                 await message.reply(f"User {target} has been banned.")
             return
+            
         elif content.startswith("unban "):
-            target = content.split(" ")[1]
+            target = content.split(" ")[1].strip()
             if target in banned_users:
                 banned_users.remove(target)
                 save_list(BANNED_USERS_FILE, banned_users)
                 await message.reply(f"User {target} has been unbanned.")
             return
+            
         elif ":" in content:
             parts = content.split(":", 1)
             ids = parts[0].split()
