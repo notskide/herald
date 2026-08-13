@@ -1,3 +1,5 @@
-cffi==2.1.1
-cryptography @ file:///home/builder/.termux-build/python-cryptography/src
-pycparser==3.0
+discord.py
+aiohttp
+edge-tts
+flask
+
