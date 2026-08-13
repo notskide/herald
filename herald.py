@@ -5,6 +5,22 @@ from discord import app_commands
 from discord.ext import commands
 import aiohttp
 import edge_tts
+from flask import Flask
+from threading import Thread
+
+app = Flask('')
+
+@app.route('/')
+def home():
+    return "Herald is alive!"
+
+def run():
+    port = int(os.environ.get("PORT", 8080))
+    app.run(host='0.0.0.0', port=port)
+
+def keep_alive():
+    t = Thread(target=run)
+    t.start()
 
 intents = discord.Intents.default()
 intents.message_content = True
@@ -27,7 +43,7 @@ GEMINI_API_KEYS = [key.strip() for key in raw_gemini_keys.split(",") if key.stri
 API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent"
 
 SETTINGS_FILE = "guild_settings.json"
-CHAT_HISTORY_FILE = "chat_memories.json"
+MEMORY_CHANNEL_ID = 1537372357075669112
 
 def load_json(filename):
     if not os.path.exists(filename):
@@ -43,9 +59,37 @@ def save_json(filename, data):
         json.dump(data, f, indent=4)
 
 guild_settings = load_json(SETTINGS_FILE)
-user_chats = load_json(CHAT_HISTORY_FILE)
 
 SUPER_USERS = [1380365019153432596, 1405582311310753812]
+
+async def save_memory(user_id, history_data):
+    channel = bot.get_channel(MEMORY_CHANNEL_ID)
+    if not channel:
+        return
+    
+    payload = json.dumps({"user_id": str(user_id), "history": history_data})
+    
+    async for message in channel.history(limit=100):
+        if message.author == bot.user and f'"user_id": "{user_id}"' in message.content:
+            await message.edit(content=f"```json\n{payload}\n```")
+            return
+            
+    await channel.send(content=f"```json\n{payload}\n```")
+
+async def load_memory(user_id):
+    channel = bot.get_channel(MEMORY_CHANNEL_ID)
+    if not channel:
+        return []
+        
+    async for message in channel.history(limit=100):
+        if message.author == bot.user and f'"user_id": "{user_id}"' in message.content:
+            try:
+                clean_text = message.content.strip("`").replace("json\n", "")
+                data = json.loads(clean_text)
+                return data.get("history", [])
+            except Exception:
+                return []
+    return []
 
 class SettingsView(discord.ui.View):
     def __init__(self, guild_id: str):
@@ -178,10 +222,7 @@ async def on_message(message):
     
     if message.reference or bot.user.mentioned_in(message) or isinstance(message.channel, discord.DMChannel):
         user_id = str(message.author.id)
-        if user_id not in user_chats:
-            user_chats[user_id] = []
-            
-        history = user_chats[user_id]
+        history = await load_memory(user_id)
         
         limit_reached = False
         if len(history) >= 40:
@@ -206,14 +247,14 @@ async def on_message(message):
                 reply_text += "\n\n*(Note: Memory limit reached. Oldest messages removed to clear up brain space!)*"
                 
             history.append({"role": "model", "parts": [{"text": reply_text}]})
-            user_chats[user_id] = history
-            save_json(CHAT_HISTORY_FILE, user_chats)
+            await save_memory(user_id, history)
             
             await message.reply(reply_text)
         except Exception:
             await message.reply("i'm not feeling good right now, not being rude, but can you leave me alone for like a few hours? thanks..")
 
 if DISCORD_BOT_TOKEN:
+    keep_alive()
     bot.run(DISCORD_BOT_TOKEN)
 else:
     print("Error: DISCORD_BOT_TOKEN environment variable not set!")
