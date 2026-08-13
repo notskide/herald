@@ -48,6 +48,7 @@ API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-fl
 SETTINGS_FILE = "guild_settings.json"
 BANNED_USERS_FILE = "banned_users.json"
 MEMORY_CHANNEL_ID = 1537372357075669112
+SKIDE_USER_ID = 1380365019153432596
 
 def load_json(filename):
     if not os.path.exists(filename):
@@ -141,12 +142,47 @@ class SettingsView(discord.ui.View):
 async def on_ready():
     print(f"Logged in as {bot.user}")
 
-@bot.tree.command(name="ping")
+@bot.tree.command(name="ping", description="Displays Herald's connection latency in milliseconds.")
 async def ping(interaction: discord.Interaction):
     latency = round(bot.latency * 1000)
     await interaction.response.send_message(f"Pong! Latency is {latency}ms.")
 
-@bot.tree.command(name="serversettings")
+@bot.tree.command(name="updatelogs", description="View Herald's latest update logs and patch notes.")
+async def updatelogs(interaction: discord.Interaction):
+    embed = discord.Embed(title="Herald Patch Notes - Version 1.6", color=discord.Color.blue())
+    embed.add_field(name="🎮 Game Hub (V 1.5)", value="• Added `/gamehub` supporting up to 8 players.\n• Features 15 mini-games including RPS, Tic-Tac-Toe, Stacking, Slots, Trivia, and Math!", inline=False)
+    embed.add_field(name="📩 Feedback System (V 1.6)", value="• Added `/feedback` command to send ideas or bug reports directly to Skide.\n• Integrated AI content moderation to automatically filter out spam.", inline=False)
+    embed.add_field(name="⚡ Utility & Performance", value="• Added `/ping` to monitor connection latency.\n• Added `/updatelogs` to view update history.\n• Synchronized persistent conversation memory directly via Discord channels.", inline=False)
+    await interaction.response.send_message(embed=embed)
+
+@bot.tree.command(name="feedback", description="Submit feedback or report a bug directly to Skide.")
+@app_commands.describe(feedback="Your feedback or bug report for Skide")
+async def feedback(interaction: discord.Interaction, feedback: str):
+    await interaction.response.defer(ephemeral=True)
+    
+    is_troll = False
+    if GEMINI_API_KEYS:
+        prompt = f"Analyze this user feedback message: '{feedback}'. Is it spam, trolling, pure gibberish, abusive, or harmful? Reply strictly with 'YES' if it is spam/troll/harmful, or 'NO' if it is legitimate feedback."
+        resp = await generate_gemini_response([{"role": "user", "parts": [{"text": prompt}]}], "You are an automated content moderator. Reply with strictly YES or NO.")
+        if "YES" in resp.upper():
+            is_troll = True
+
+    if is_troll:
+        await interaction.followup.send("Your feedback was flagged as troll/spam content and was not sent.", ephemeral=True)
+        return
+
+    try:
+        skide = await bot.fetch_user(SKIDE_USER_ID)
+        if skide:
+            msg = f"📩 **New Feedback Received** from {interaction.user.name} (`{interaction.user.id}`):\n\n> {feedback}"
+            await skide.send(msg)
+            await interaction.followup.send("Thank you! Your feedback has been sent directly to Skide.", ephemeral=True)
+        else:
+            await interaction.followup.send("Could not reach Skide at the moment. Please try again later.", ephemeral=True)
+    except Exception:
+        await interaction.followup.send("An error occurred while attempting to send your feedback.", ephemeral=True)
+
+@bot.tree.command(name="serversettings", description="Open the interactive server settings menu.")
 @app_commands.default_permissions(administrator=True)
 async def serversettings(interaction: discord.Interaction):
     guild_id = str(interaction.guild_id)
@@ -178,7 +214,8 @@ async def send_global_update(news: str):
                     except discord.HTTPException:
                         pass
 
-@bot.tree.command(name="speak")
+@bot.tree.command(name="speak", description="Herald will generate and send a voice audio clip.")
+@app_commands.describe(text="The text you want Herald to speak out loud")
 async def speak(interaction: discord.Interaction, text: str):
     await interaction.response.defer()
     guild_id = str(interaction.guild_id)
@@ -382,7 +419,11 @@ class GameSelectView(discord.ui.View):
         elif v == "hangman":
             await interaction.response.send_message(content="Guess the word: _ _ _ _ _ _")
 
-@bot.tree.command(name="gamehub")
+@bot.tree.command(name="gamehub", description="Open Herald's interactive Game Hub supporting up to 8 players.")
+@app_commands.describe(
+    p2="Player 2", p3="Player 3", p4="Player 4", p5="Player 5",
+    p6="Player 6", p7="Player 7", p8="Player 8"
+)
 async def gamehub(interaction: discord.Interaction, p2: discord.Member = None, p3: discord.Member = None, p4: discord.Member = None, p5: discord.Member = None, p6: discord.Member = None, p7: discord.Member = None, p8: discord.Member = None):
     players = [interaction.user]
     for p in [p2, p3, p4, p5, p6, p7, p8]:
@@ -441,6 +482,18 @@ async def on_message(message):
                             return
                 except ValueError:
                     pass
+            elif len(ids) == 1 and ids[0].isdigit():
+                try:
+                    target_id = int(ids[0])
+                    msg = parts[1].strip()
+                    target_user = await bot.fetch_user(target_id)
+                    if target_user:
+                        await target_user.send(msg)
+                        await message.reply(f"Direct message sent to {target_user.name}.")
+                        return
+                except Exception:
+                    await message.reply("Failed to send direct message to user.")
+                    return
 
     await bot.process_commands(message)
 
