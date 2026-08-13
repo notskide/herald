@@ -139,11 +139,6 @@ async def generate_gemini_response(formatted_history, system_instruction):
         },
         "contents": formatted_history,
         "tools": [{"google_search": {}}]
-git init
-git add .
-git commit -m "Initial Herald upload"
-git branch -M main
-git remote add origin https://github.com/notskide/Herald.git
     }
     
     async with aiohttp.ClientSession() as session:
