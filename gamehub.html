@@ -30,6 +30,13 @@ body {
     max-width: 450px;
 }
 
+.dashboard-panel {
+    max-width: 900px;
+    display: flex;
+    flex-direction: column;
+    height: 90vh;
+}
+
 .screen {
     display: none;
     width: 100%;
@@ -131,9 +138,72 @@ select, input {
     color: #fff;
 }
 
+.dashboard-layout {
+    display: flex;
+    gap: 20px;
+    flex: 1;
+    min-height: 0;
+}
+
+.main-content {
+    flex: 2;
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto;
+}
+
+.chat-sidebar {
+    flex: 1;
+    background: #2a2a2a;
+    border: 1px solid #444;
+    border-radius: 4px;
+    display: flex;
+    flex-direction: column;
+}
+
+.chat-messages {
+    flex: 1;
+    padding: 10px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.chat-message {
+    background: #333;
+    padding: 8px;
+    border-radius: 4px;
+    font-size: 0.9rem;
+    word-break: break-word;
+}
+
+.chat-message.self {
+    background: #0056b3;
+    align-self: flex-end;
+}
+
+.chat-input-area {
+    display: flex;
+    padding: 10px;
+    border-top: 1px solid #444;
+}
+
+.chat-input-area input {
+    border-radius: 4px 0 0 4px;
+    margin: 0;
+}
+
+.chat-input-area button {
+    width: auto;
+    border-radius: 0 4px 4px 0;
+    margin: 0;
+    padding: 0 15px;
+}
+
 .games-grid {
     display: grid;
-    grid-template-columns: 1fr;
+    grid-template-columns: repeat(2, 1fr);
     gap: 10px;
     margin-top: 15px;
 }
@@ -149,6 +219,102 @@ select, input {
 
 .game-card:hover {
     background: #333;
+}
+
+.game-container {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    background: #2a2a2a;
+    border: 1px solid #444;
+    border-radius: 4px;
+    padding: 20px;
+    min-height: 300px;
+    margin-bottom: 15px;
+}
+
+.ttt-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 80px);
+    gap: 5px;
+}
+
+.ttt-cell {
+    width: 80px;
+    height: 80px;
+    background: #333;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 2.5rem;
+    cursor: pointer;
+    border-radius: 4px;
+}
+
+.ttt-cell:hover {
+    background: #444;
+}
+
+canvas {
+    background: #000;
+    border: 2px solid #444;
+}
+
+.rps-btn {
+    font-size: 2rem;
+    padding: 10px 20px;
+    margin: 5px;
+    cursor: pointer;
+    background: #333;
+    border: 1px solid #444;
+    border-radius: 4px;
+}
+
+.memory-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 60px);
+    gap: 5px;
+}
+
+.memory-card {
+    width: 60px;
+    height: 60px;
+    background: #333;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.5rem;
+    cursor: pointer;
+    border-radius: 4px;
+    color: transparent;
+}
+
+.memory-card.flipped {
+    background: #555;
+    color: #fff;
+}
+
+.mole-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 80px);
+    gap: 5px;
+}
+
+.mole-hole {
+    width: 80px;
+    height: 80px;
+    background: #222;
+    border-radius: 50%;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 2.5rem;
+}
+
+.mole-active {
+    background: #8b4513;
 }
 </style>
 </head>
@@ -169,10 +335,10 @@ select, input {
         <div class="input-group">
             <label for="playerCount">Max Players</label>
             <select id="playerCount">
+                <option value="1">1 Player (Single Player)</option>
                 <option value="2">2 Players</option>
                 <option value="3">3 Players</option>
                 <option value="4">4 Players</option>
-                <option value="8">8 Players</option>
             </select>
         </div>
         <div class="input-group">
@@ -214,22 +380,43 @@ select, input {
 </div>
 
 <div id="dashboard" class="screen">
-    <div class="panel">
-        <h2>CHOOSE A GAME</h2>
-        <p><span id="dashRoomInfo">Room: PUBLIC</span> | <span id="dashPlayerInfo">Players: 4/4</span></p>
-        <div class="games-grid">
-            <div class="game-card" onclick="playGame('Neon Tic-Tac-Toe')">Tic-Tac-Toe</div>
-            <div class="game-card" onclick="playGame('Trivia Clash')">Trivia Clash</div>
-            <div class="game-card" onclick="playGame('Draw & Guess')">Draw & Guess</div>
+    <div class="panel dashboard-panel">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+            <h2>HUB DASHBOARD</h2>
+            <div style="font-size: 0.9rem; color: #aaa;">
+                <span id="dashRoomInfo">Room: PUBLIC</span> | <span id="dashPlayerInfo">Players: 4/4</span>
+            </div>
         </div>
-        <button class="btn" onclick="leaveLobby()" style="margin-top: 20px;">Disconnect</button>
+        
+        <div class="dashboard-layout">
+            <div class="main-content" id="gameArea">
+                <div class="games-grid">
+                    <div class="game-card" onclick="loadTicTacToe()">Tic-Tac-Toe</div>
+                    <div class="game-card" onclick="loadSnake()">Snake</div>
+                    <div class="game-card" onclick="loadRPS()">Rock Paper Scissors</div>
+                    <div class="game-card" onclick="loadMemory()">Memory Match</div>
+                    <div class="game-card" onclick="loadWhackAMole()">Whack-a-Mole</div>
+                </div>
+                <button class="btn" onclick="leaveLobby()" style="margin-top: auto;">Disconnect</button>
+            </div>
+            
+            <div class="chat-sidebar">
+                <div class="chat-messages" id="chatMessages">
+                    <div class="chat-message">System: Welcome to the room!</div>
+                </div>
+                <div class="chat-input-area">
+                    <input type="text" id="chatInput" placeholder="Message..." onkeypress="handleChatKey(event)">
+                    <button class="btn btn-primary" onclick="sendChatMessage()">Send</button>
+                </div>
+            </div>
+        </div>
     </div>
 </div>
 
 <script>
 const mockPublicRooms = [
-    { name: "Neon Strikers", players: 2, max: 4, code: "PUB01" },
-    { name: "Late Night Chill", players: 1, max: 8, code: "PUB02" },
+    { name: "Neon Strikers", players: 1, max: 2, code: "PUB01" },
+    { name: "Late Night Chill", players: 1, max: 4, code: "PUB02" },
     { name: "Pro Gamers Only", players: 3, max: 4, code: "PUB03" }
 ];
 
@@ -241,19 +428,18 @@ let currentRoomData = {
     maxPlayers: 4
 };
 
+let gameInterval = null;
+let fakeChatInterval = null;
+
 function navigate(fromId, toId) {
     document.getElementById(fromId).classList.remove('active');
     document.getElementById(toId).classList.add('active');
-    
-    if (toId === 'joinRoom') {
-        renderPublicRooms();
-    }
+    if (toId === 'joinRoom') renderPublicRooms();
 }
 
 function renderPublicRooms() {
     const list = document.getElementById('publicRoomsList');
     list.innerHTML = '';
-    
     mockPublicRooms.forEach(room => {
         const item = document.createElement('div');
         item.className = 'room-item';
@@ -269,9 +455,8 @@ function renderPublicRooms() {
 }
 
 function generateRoom() {
-    const max = document.getElementById('playerCount').value;
+    const max = parseInt(document.getElementById('playerCount').value);
     const privacy = document.getElementById('roomPrivacy').value;
-    
     currentRoomData = {
         isHost: true,
         privacy: privacy,
@@ -279,7 +464,6 @@ function generateRoom() {
         players: 1,
         code: privacy === 'private' ? Math.random().toString(36).substring(2, 7).toUpperCase() : 'PUBLIC'
     };
-
     setupLobby();
     navigate('createRoom', 'lobby');
 }
@@ -287,28 +471,14 @@ function generateRoom() {
 function joinWithCode() {
     const code = document.getElementById('roomCode').value.toUpperCase();
     if (code.length === 5) {
-        currentRoomData = {
-            isHost: false,
-            privacy: 'private',
-            maxPlayers: 4,
-            players: 2,
-            code: code
-        };
+        currentRoomData = { isHost: false, privacy: 'private', maxPlayers: 4, players: 2, code: code };
         setupLobby();
         navigate('joinRoom', 'lobby');
-    } else {
-        alert("Please enter a valid 5-digit code.");
     }
 }
 
 function joinPublicRoom(max) {
-    currentRoomData = {
-        isHost: false,
-        privacy: 'public',
-        maxPlayers: max,
-        players: 2,
-        code: 'PUBLIC'
-    };
+    currentRoomData = { isHost: false, privacy: 'public', maxPlayers: max, players: 2, code: 'PUBLIC' };
     setupLobby();
     navigate('joinRoom', 'lobby');
 }
@@ -332,49 +502,325 @@ function setupLobby() {
     } else {
         title.innerText = "Waiting for host...";
         startBtn.style.display = 'none';
-        
-        setTimeout(() => {
-            launchDashboard();
-        }, 3000);
+        setTimeout(launchDashboard, 1500);
     }
 }
 
 function launchDashboard() {
-    document.getElementById('dashRoomInfo').innerText = `Room: ${currentRoomData.privacy === 'private' ? currentRoomData.code : 'PUBLIC'}`;
+    document.getElementById('dashRoomInfo').innerText = `Room: ${currentRoomData.code}`;
     document.getElementById('dashPlayerInfo').innerText = `Players: ${currentRoomData.players}/${currentRoomData.maxPlayers}`;
+    document.getElementById('chatMessages').innerHTML = '<div class="chat-message">System: Welcome to the room!</div>';
+    resetDashboard();
     navigate('lobby', 'dashboard');
+    startFakeChat();
 }
 
 function leaveLobby() {
-    const currentScreen = document.querySelector('.screen.active').id;
-    navigate(currentScreen, 'home');
+    if (gameInterval) clearInterval(gameInterval);
+    if (fakeChatInterval) clearInterval(fakeChatInterval);
+    navigate(document.querySelector('.screen.active').id, 'home');
 }
 
-function playGame(gameName) {
-    const dashPanel = document.querySelector('#dashboard .panel');
-    dashPanel.innerHTML = `
-        <h2>${gameName.toUpperCase()}</h2>
-        <div style="height: 200px; display: flex; align-items: center; justify-content: center; border: 1px dashed #444; margin: 20px 0; background: #2a2a2a;">
-            <p style="margin: 0;">Game Canvas Active</p>
-        </div>
-        <button class="btn" onclick="resetDashboard()">Back to Games</button>
-    `;
+function handleChatKey(e) {
+    if (e.key === 'Enter') sendChatMessage();
+}
+
+function sendChatMessage() {
+    const input = document.getElementById('chatInput');
+    const msg = input.value.trim();
+    if (!msg) return;
+    addChatMessage('You', msg, true);
+    input.value = '';
+    
+    if (currentRoomData.maxPlayers > 1) {
+        setTimeout(() => {
+            if (Math.random() > 0.5) {
+                const replies = ["Nice!", "gg", "Let's play another", "Wait what?", "lol"];
+                addChatMessage('Player2', replies[Math.floor(Math.random() * replies.length)], false);
+            }
+        }, 1000 + Math.random() * 2000);
+    }
+}
+
+function addChatMessage(sender, text, isSelf) {
+    const chat = document.getElementById('chatMessages');
+    const div = document.createElement('div');
+    div.className = `chat-message ${isSelf ? 'self' : ''}`;
+    div.innerText = `${sender}: ${text}`;
+    chat.appendChild(div);
+    chat.scrollTop = chat.scrollHeight;
+}
+
+function startFakeChat() {
+    if (fakeChatInterval) clearInterval(fakeChatInterval);
+    if (currentRoomData.maxPlayers > 1) {
+        fakeChatInterval = setInterval(() => {
+            if (Math.random() > 0.8 && document.getElementById('dashboard').classList.contains('active')) {
+                addChatMessage('Player2', "Anyone want to switch games?", false);
+            }
+        }, 30000);
+    }
 }
 
 function resetDashboard() {
-    const dash = document.getElementById('dashboard');
-    dash.innerHTML = `
-    <div class="panel">
-        <h2>CHOOSE A GAME</h2>
-        <p><span id="dashRoomInfo">Room: ${currentRoomData.privacy === 'private' ? currentRoomData.code : 'PUBLIC'}</span> | <span id="dashPlayerInfo">Players: ${currentRoomData.players}/${currentRoomData.maxPlayers}</span></p>
+    if (gameInterval) clearInterval(gameInterval);
+    document.getElementById('gameArea').innerHTML = `
         <div class="games-grid">
-            <div class="game-card" onclick="playGame('Neon Tic-Tac-Toe')">Tic-Tac-Toe</div>
-            <div class="game-card" onclick="playGame('Trivia Clash')">Trivia Clash</div>
-            <div class="game-card" onclick="playGame('Draw & Guess')">Draw & Guess</div>
+            <div class="game-card" onclick="loadTicTacToe()">Tic-Tac-Toe</div>
+            <div class="game-card" onclick="loadSnake()">Snake</div>
+            <div class="game-card" onclick="loadRPS()">Rock Paper Scissors</div>
+            <div class="game-card" onclick="loadMemory()">Memory Match</div>
+            <div class="game-card" onclick="loadWhackAMole()">Whack-a-Mole</div>
         </div>
-        <button class="btn" onclick="leaveLobby()" style="margin-top: 20px;">Disconnect</button>
-    </div>
+        <button class="btn" onclick="leaveLobby()" style="margin-top: auto;">Disconnect</button>
     `;
+}
+
+function renderGameContainer(title, html) {
+    if (gameInterval) clearInterval(gameInterval);
+    document.getElementById('gameArea').innerHTML = `
+        <h3 style="text-align:center; margin-bottom:10px;">${title}</h3>
+        <div class="game-container">${html}</div>
+        <h4 id="gameStatus" style="text-align:center; margin-bottom:10px; height: 20px;"></h4>
+        <button class="btn" onclick="resetDashboard()" style="margin-top: auto;">Back to Games</button>
+    `;
+}
+
+function loadTicTacToe() {
+    let board = ["", "", "", "", "", "", "", "", ""];
+    let isXTurn = true;
+    let gameOver = false;
+    let isSinglePlayer = currentRoomData.players === 1;
+
+    let html = `<div class="ttt-grid" id="tttGrid">`;
+    for(let i=0; i<9; i++) {
+        html += `<div class="ttt-cell" onclick="tttClick(${i})"></div>`;
+    }
+    html += `</div><button class="btn btn-primary" onclick="loadTicTacToe()" style="margin-top:15px; width:auto;">Restart</button>`;
+    renderGameContainer("Tic-Tac-Toe", html);
+
+    window.tttClick = function(idx) {
+        if (gameOver || board[idx] !== "") return;
+        board[idx] = isXTurn ? "X" : "O";
+        updateTTT();
+        checkTTTWin();
+        isXTurn = !isXTurn;
+        
+        if (!gameOver && !isXTurn && isSinglePlayer) {
+            setTimeout(() => {
+                let empty = [];
+                board.forEach((c, i) => { if(c === "") empty.push(i) });
+                if(empty.length > 0) {
+                    let r = empty[Math.floor(Math.random() * empty.length)];
+                    board[r] = "O";
+                    updateTTT();
+                    checkTTTWin();
+                    isXTurn = true;
+                }
+            }, 500);
+        }
+    }
+
+    function updateTTT() {
+        const cells = document.querySelectorAll('.ttt-cell');
+        board.forEach((val, i) => { cells[i].innerText = val; });
+    }
+
+    function checkTTTWin() {
+        const wins = [[0,1,2],[3,4,5],[6,7,8],[0,3,6],[1,4,7],[2,5,8],[0,4,8],[2,4,6]];
+        for (let w of wins) {
+            if (board[w[0]] && board[w[0]] === board[w[1]] && board[w[0]] === board[w[2]]) {
+                document.getElementById('gameStatus').innerText = `${board[w[0]]} Wins!`;
+                gameOver = true;
+                return;
+            }
+        }
+        if (!board.includes("")) {
+            document.getElementById('gameStatus').innerText = "Draw!";
+            gameOver = true;
+        }
+    }
+}
+
+function loadSnake() {
+    renderGameContainer("Snake", `<canvas id="snakeCanvas" width="300" height="300"></canvas>`);
+    const canvas = document.getElementById('snakeCanvas');
+    const ctx = canvas.getContext('2d');
+    const box = 15;
+    let snake = [{x: 9 * box, y: 10 * box}];
+    let food = {x: Math.floor(Math.random()*19)*box, y: Math.floor(Math.random()*19)*box};
+    let d = "RIGHT";
+    let score = 0;
+
+    const currentKeyHandler = function(event) {
+        if(event.keyCode == 37 && d != "RIGHT") d = "LEFT";
+        else if(event.keyCode == 38 && d != "DOWN") d = "UP";
+        else if(event.keyCode == 39 && d != "LEFT") d = "RIGHT";
+        else if(event.keyCode == 40 && d != "UP") d = "DOWN";
+    };
+    document.addEventListener("keydown", currentKeyHandler);
+
+    function draw() {
+        ctx.fillStyle = "#000";
+        ctx.fillRect(0, 0, 300, 300);
+
+        for(let i = 0; i < snake.length; i++) {
+            ctx.fillStyle = (i === 0) ? "#00f2ff" : "#fff";
+            ctx.fillRect(snake[i].x, snake[i].y, box, box);
+            ctx.strokeStyle = "#000";
+            ctx.strokeRect(snake[i].x, snake[i].y, box, box);
+        }
+
+        ctx.fillStyle = "red";
+        ctx.fillRect(food.x, food.y, box, box);
+
+        let snakeX = snake[0].x;
+        let snakeY = snake[0].y;
+
+        if(d == "LEFT") snakeX -= box;
+        if(d == "UP") snakeY -= box;
+        if(d == "RIGHT") snakeX += box;
+        if(d == "DOWN") snakeY += box;
+
+        if(snakeX == food.x && snakeY == food.y) {
+            score++;
+            document.getElementById('gameStatus').innerText = `Score: ${score}`;
+            food = {x: Math.floor(Math.random()*19)*box, y: Math.floor(Math.random()*19)*box};
+        } else {
+            snake.pop();
+        }
+
+        let newHead = {x: snakeX, y: snakeY};
+
+        if(snakeX < 0 || snakeY < 0 || snakeX >= 300 || snakeY >= 300 || collision(newHead, snake)) {
+            clearInterval(gameInterval);
+            document.removeEventListener("keydown", currentKeyHandler);
+            document.getElementById('gameStatus').innerText = `Game Over! Final Score: ${score}`;
+        }
+        snake.unshift(newHead);
+    }
+
+    function collision(head, array) {
+        for(let i = 0; i < array.length; i++) {
+            if(head.x == array[i].x && head.y == array[i].y) return true;
+        }
+        return false;
+    }
+
+    document.getElementById('gameStatus').innerText = `Score: 0`;
+    gameInterval = setInterval(draw, 100);
+}
+
+function loadRPS() {
+    renderGameContainer("Rock Paper Scissors", `
+        <div style="font-size: 3rem; margin-bottom: 20px;" id="rpsDisplay">❔ vs ❔</div>
+        <div>
+            <button class="rps-btn" onclick="playRPS('✊')">✊</button>
+            <button class="rps-btn" onclick="playRPS('✋')">✋</button>
+            <button class="rps-btn" onclick="playRPS('✌️')">✌️</button>
+        </div>
+    `);
+
+    window.playRPS = function(player) {
+        const options = ['✊', '✋', '✌️'];
+        const bot = options[Math.floor(Math.random() * 3)];
+        document.getElementById('rpsDisplay').innerText = `${player} vs ${bot}`;
+        
+        let res = "You lose!";
+        if (player === bot) res = "Draw!";
+        else if ((player === '✊' && bot === '✌️') || (player === '✋' && bot === '✊') || (player === '✌️' && bot === '✋')) res = "You win!";
+        
+        document.getElementById('gameStatus').innerText = res;
+    }
+}
+
+function loadMemory() {
+    let items = ['🍎','🍌','🍇','🍉','🍒','🍓','🍎','🍌','🍇','🍉','🍒','🍓'];
+    items.sort(() => 0.5 - Math.random());
+    let flipped = [];
+    let matched = 0;
+    let lock = false;
+
+    let html = `<div class="memory-grid">`;
+    items.forEach((item, i) => {
+        html += `<div class="memory-card" id="mem-${i}" onclick="memClick(${i}, '${item}')">?</div>`;
+    });
+    html += `</div><button class="btn btn-primary" onclick="loadMemory()" style="margin-top:15px; width:auto;">Restart</button>`;
+    renderGameContainer("Memory Match", html);
+
+    window.memClick = function(idx, val) {
+        if (lock || flipped.find(f => f.idx === idx) || document.getElementById(`mem-${idx}`).classList.contains('flipped')) return;
+        
+        let card = document.getElementById(`mem-${idx}`);
+        card.innerText = val;
+        card.classList.add('flipped');
+        flipped.push({idx, val});
+
+        if (flipped.length === 2) {
+            lock = true;
+            if (flipped[0].val === flipped[1].val) {
+                matched += 2;
+                flipped = [];
+                lock = false;
+                if (matched === items.length) document.getElementById('gameStatus').innerText = "You found them all!";
+            } else {
+                setTimeout(() => {
+                    document.getElementById(`mem-${flipped[0].idx}`).innerText = '?';
+                    document.getElementById(`mem-${flipped[0].idx}`).classList.remove('flipped');
+                    document.getElementById(`mem-${flipped[1].idx}`).innerText = '?';
+                    document.getElementById(`mem-${flipped[1].idx}`).classList.remove('flipped');
+                    flipped = [];
+                    lock = false;
+                }, 800);
+            }
+        }
+    }
+}
+
+function loadWhackAMole() {
+    let score = 0;
+    let time = 15;
+    
+    let html = `<div class="mole-grid" id="moleGrid">`;
+    for(let i=0; i<9; i++) html += `<div class="mole-hole" id="mole-${i}" onclick="whack(${i})"></div>`;
+    html += `</div><button class="btn btn-primary" onclick="loadWhackAMole()" id="moleStartBtn" style="margin-top:15px; width:auto;">Start (15s)</button>`;
+    renderGameContainer("Whack-a-Mole", html);
+
+    window.whack = function(idx) {
+        let hole = document.getElementById(`mole-${idx}`);
+        if(hole.innerText === '🐹') {
+            score++;
+            hole.innerText = '';
+            document.getElementById('gameStatus').innerText = `Score: ${score} | Time: ${time}s`;
+        }
+    }
+
+    const startBtn = document.getElementById('moleStartBtn');
+    startBtn.onclick = function() {
+        startBtn.style.display = 'none';
+        score = 0;
+        time = 15;
+        document.getElementById('gameStatus').innerText = `Score: ${score} | Time: ${time}s`;
+        
+        let moveInterval = setInterval(() => {
+            for(let i=0; i<9; i++) document.getElementById(`mole-${i}`).innerText = '';
+            let r = Math.floor(Math.random() * 9);
+            document.getElementById(`mole-${r}`).innerText = '🐹';
+        }, 800);
+
+        gameInterval = setInterval(() => {
+            time--;
+            document.getElementById('gameStatus').innerText = `Score: ${score} | Time: ${time}s`;
+            if(time <= 0) {
+                clearInterval(gameInterval);
+                clearInterval(moveInterval);
+                for(let i=0; i<9; i++) document.getElementById(`mole-${i}`).innerText = '';
+                document.getElementById('gameStatus').innerText = `Time's up! Final Score: ${score}`;
+                startBtn.style.display = 'block';
+                startBtn.innerText = 'Play Again';
+            }
+        }, 1000);
+    }
 }
 </script>
 </body>
