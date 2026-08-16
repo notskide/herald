@@ -8,11 +8,12 @@
 * { box-sizing: border-box; margin: 0; padding: 0; font-family: sans-serif; }
 body { background-color: #121212; color: #e0e0e0; height: 100vh; display: flex; align-items: center; justify-content: center; }
 .panel { background: #1e1e1e; border: 1px solid #333; border-radius: 8px; padding: 30px; width: 90%; max-width: 450px; }
-.dashboard-panel { max-width: 900px; display: flex; flex-direction: column; height: 90vh; }
+.dashboard-panel { max-width: 1000px; width: 95%; display: flex; flex-direction: column; height: 90vh; }
 .screen { display: none; width: 100%; }
 .screen.active { display: flex; justify-content: center; }
 h1 { text-align: center; font-size: 1.8rem; margin-bottom: 5px; color: #fff; }
 h2 { text-align: center; font-size: 1.3rem; margin-bottom: 20px; color: #ccc; }
+h3 { margin-bottom: 15px; color: #fff; }
 p { text-align: center; margin-bottom: 20px; color: #999; }
 .btn { background: #333; border: 1px solid #444; color: #fff; padding: 12px; font-size: 1rem; border-radius: 4px; cursor: pointer; width: 100%; margin-bottom: 10px; }
 .btn:hover { background: #444; }
@@ -25,7 +26,7 @@ select, input { background: #2a2a2a; border: 1px solid #444; color: #fff; paddin
 .room-item { display: flex; justify-content: space-between; align-items: center; background: #2a2a2a; padding: 10px; border-radius: 4px; margin-bottom: 10px; }
 .code-display { font-size: 2rem; font-weight: bold; text-align: center; letter-spacing: 5px; margin: 15px 0; color: #fff; }
 .dashboard-layout { display: flex; gap: 20px; flex: 1; min-height: 0; }
-.main-content { flex: 2; display: flex; flex-direction: column; overflow-y: auto; }
+.main-content { flex: 2; display: flex; flex-direction: column; overflow-y: auto; background: #222; padding: 15px; border-radius: 4px; border: 1px solid #444; }
 .chat-sidebar { flex: 1; background: #2a2a2a; border: 1px solid #444; border-radius: 4px; display: flex; flex-direction: column; }
 .chat-messages { flex: 1; padding: 10px; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; }
 .chat-message { background: #333; padding: 8px; border-radius: 4px; font-size: 0.9rem; word-break: break-word; }
@@ -33,9 +34,28 @@ select, input { background: #2a2a2a; border: 1px solid #444; color: #fff; paddin
 .chat-input-area { display: flex; padding: 10px; border-top: 1px solid #444; }
 .chat-input-area input { border-radius: 4px 0 0 4px; margin: 0; }
 .chat-input-area button { width: auto; border-radius: 0 4px 4px 0; margin: 0; padding: 0 15px; }
-.games-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; margin-top: 15px; }
-.game-card { background: #2a2a2a; border: 1px solid #444; border-radius: 4px; padding: 15px; text-align: center; cursor: pointer; }
-.game-card:hover { background: #333; }
+.games-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin-top: 15px; }
+.game-card { background: #2a2a2a; border: 1px solid #555; border-radius: 4px; padding: 20px 10px; text-align: center; cursor: pointer; transition: 0.2s; }
+.game-card:hover { background: #0056b3; border-color: #004494; }
+.game-view { display: none; flex-direction: column; align-items: center; justify-content: center; width: 100%; height: 100%; }
+.game-view.active { display: flex; }
+.ttt-board { display: grid; grid-template-columns: repeat(3, 100px); gap: 5px; margin: 20px 0; }
+.ttt-cell { width: 100px; height: 100px; background: #333; display: flex; align-items: center; justify-content: center; font-size: 3rem; cursor: pointer; border-radius: 4px; }
+.ttt-cell:hover { background: #444; }
+canvas { background: #111; border: 2px solid #555; border-radius: 4px; }
+.rps-buttons { display: flex; gap: 15px; margin: 20px 0; }
+.rps-btn { font-size: 3rem; background: #333; border: none; border-radius: 50%; width: 80px; height: 80px; cursor: pointer; }
+.rps-btn:hover { background: #555; }
+.memory-board { display: grid; grid-template-columns: repeat(4, 70px); gap: 10px; margin: 20px 0; }
+.memory-card { width: 70px; height: 70px; background: #0056b3; display: flex; align-items: center; justify-content: center; font-size: 2rem; cursor: pointer; border-radius: 4px; color: transparent; transition: 0.3s; }
+.memory-card.flipped { background: #333; color: #fff; }
+.trivia-options { display: flex; flex-direction: column; gap: 10px; width: 100%; max-width: 400px; margin: 20px 0; }
+.trivia-opt { background: #333; border: 1px solid #555; padding: 15px; color: #fff; cursor: pointer; border-radius: 4px; text-align: left; }
+.trivia-opt:hover { background: #444; }
+.game-header { width: 100%; display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; }
+.game-header h3 { margin: 0; }
+.back-btn { width: auto; padding: 5px 15px; margin: 0; background: #555; }
+#gameMessage { font-size: 1.2rem; margin-bottom: 15px; min-height: 28px; }
 </style>
 </head>
 <body>
@@ -113,14 +133,73 @@ select, input { background: #2a2a2a; border: 1px solid #444; color: #fff; paddin
         </div>
         
         <div class="dashboard-layout">
-            <div class="main-content" id="gameArea">
-                <h3 style="text-align:center;">Local Games</h3>
-                <div class="games-grid">
-                    <div class="game-card">Tic-Tac-Toe</div>
-                    <div class="game-card">Snake</div>
-                    <div class="game-card">Rock Paper Scissors</div>
+            <div class="main-content">
+                
+                <div id="gamesMenu" class="game-view active" style="justify-content: flex-start;">
+                    <h3 style="text-align:center; width: 100%;">Available Games</h3>
+                    <div class="games-grid">
+                        <div class="game-card" onclick="openGame('snake')">🐍 Snake</div>
+                        <div class="game-card" onclick="openGame('ttt')">❌ Tic-Tac-Toe</div>
+                        <div class="game-card" onclick="openGame('rps')">✂️ RPS</div>
+                        <div class="game-card" onclick="openGame('memory')">🃏 Memory Flip</div>
+                        <div class="game-card" onclick="openGame('trivia')">🧠 Trivia Quiz</div>
+                    </div>
+                    <button class="btn" onclick="leaveRoom()" style="margin-top: auto; max-width: 200px;">Disconnect</button>
                 </div>
-                <button class="btn" onclick="leaveRoom()" style="margin-top: auto;">Disconnect</button>
+
+                <div id="game-snake" class="game-view">
+                    <div class="game-header">
+                        <h3>Snake</h3>
+                        <button class="btn back-btn" onclick="closeGame()">Back</button>
+                    </div>
+                    <div id="gameMessage">Score: <span id="snakeScore">0</span></div>
+                    <canvas id="snakeCanvas" width="300" height="300"></canvas>
+                </div>
+
+                <div id="game-ttt" class="game-view">
+                    <div class="game-header">
+                        <h3>Tic-Tac-Toe</h3>
+                        <button class="btn back-btn" onclick="closeGame()">Back</button>
+                    </div>
+                    <div id="tttMessage" style="font-size: 1.2rem;">Player X Turn</div>
+                    <div class="ttt-board" id="tttBoard"></div>
+                    <button class="btn btn-primary" onclick="initTTT()" style="width:200px;">Restart</button>
+                </div>
+
+                <div id="game-rps" class="game-view">
+                    <div class="game-header">
+                        <h3>Rock Paper Scissors</h3>
+                        <button class="btn back-btn" onclick="closeGame()">Back</button>
+                    </div>
+                    <div id="rpsMessage" style="font-size: 1.2rem; text-align: center;">Make your choice!</div>
+                    <div class="rps-buttons">
+                        <button class="rps-btn" onclick="playRPS('🪨')">🪨</button>
+                        <button class="rps-btn" onclick="playRPS('📄')">📄</button>
+                        <button class="rps-btn" onclick="playRPS('✂️')">✂️</button>
+                    </div>
+                    <div id="rpsResult" style="margin-top: 20px; font-size: 2rem;"></div>
+                </div>
+
+                <div id="game-memory" class="game-view">
+                    <div class="game-header">
+                        <h3>Memory Flip</h3>
+                        <button class="btn back-btn" onclick="closeGame()">Back</button>
+                    </div>
+                    <div id="memoryMessage" style="font-size: 1.2rem;">Matches: <span id="memoryScore">0</span>/8</div>
+                    <div class="memory-board" id="memoryBoard"></div>
+                    <button class="btn btn-primary" onclick="initMemory()" style="width:200px; margin-top:10px;">Restart</button>
+                </div>
+
+                <div id="game-trivia" class="game-view">
+                    <div class="game-header">
+                        <h3>Trivia Quiz</h3>
+                        <button class="btn back-btn" onclick="closeGame()">Back</button>
+                    </div>
+                    <div id="triviaQuestion" style="font-size: 1.2rem; text-align: center; padding: 0 20px;">Loading...</div>
+                    <div class="trivia-options" id="triviaOptions"></div>
+                    <div id="triviaScore" style="margin-top: 10px; color: #aaa;">Score: 0</div>
+                </div>
+
             </div>
             
             <div class="chat-sidebar">
@@ -136,43 +215,46 @@ select, input { background: #2a2a2a; border: 1px solid #444; color: #fff; paddin
 
 <script>
 const protocol = window.location.protocol === 'https:' ? 'wss://' : 'ws://';
-const ws = new WebSocket(protocol + window.location.host + '/ws');
+let ws;
+try { ws = new WebSocket(protocol + window.location.host + '/ws'); } catch(e) {}
 let myUsername = "Player_" + Math.floor(Math.random() * 1000);
 document.getElementById('usernameInput').value = myUsername;
 
 let currentRoom = null;
 let isHost = false;
 
-ws.onmessage = (event) => {
-    const data = JSON.parse(event.data);
-    if (data.type === 'rooms_update') {
-        renderPublicRooms(data.rooms);
-    } else if (data.type === 'room_joined') {
-        currentRoom = data.code;
-        isHost = data.is_host;
-        setupLobby(data.code);
-        switchScreen('lobby');
-    } else if (data.type === 'room_state') {
-        document.getElementById('playerCounter').innerText = `${data.players} / ${data.max}`;
-        document.getElementById('dashPlayerInfo').innerText = `Players: ${data.players}/${data.max}`;
-        if (data.host) {
-            isHost = true;
-            document.getElementById('startGameBtn').style.display = 'block';
-            document.getElementById('lobbyTitle').innerText = "Host Lobby";
+if(ws) {
+    ws.onmessage = (event) => {
+        const data = JSON.parse(event.data);
+        if (data.type === 'rooms_update') {
+            renderPublicRooms(data.rooms);
+        } else if (data.type === 'room_joined') {
+            currentRoom = data.code;
+            isHost = data.is_host;
+            setupLobby(data.code);
+            switchScreen('lobby');
+        } else if (data.type === 'room_state') {
+            document.getElementById('playerCounter').innerText = `${data.players} / ${data.max}`;
+            document.getElementById('dashPlayerInfo').innerText = `Players: ${data.players}/${data.max}`;
+            if (data.host) {
+                isHost = true;
+                document.getElementById('startGameBtn').style.display = 'block';
+                document.getElementById('lobbyTitle').innerText = "Host Lobby";
+            }
+        } else if (data.type === 'chat_update') {
+            renderChat(data.messages);
+        } else if (data.type === 'launch_dashboard') {
+            document.getElementById('dashRoomInfo').innerText = `Room: ${currentRoom}`;
+            switchScreen('dashboard');
+        } else if (data.type === 'error') {
+            alert(data.message);
         }
-    } else if (data.type === 'chat_update') {
-        renderChat(data.messages);
-    } else if (data.type === 'launch_dashboard') {
-        document.getElementById('dashRoomInfo').innerText = `Room: ${currentRoom}`;
-        switchScreen('dashboard');
-    } else if (data.type === 'error') {
-        alert(data.message);
-    }
-};
+    };
+}
 
 document.getElementById('usernameInput').addEventListener('input', (e) => {
     myUsername = e.target.value;
-    ws.send(JSON.stringify({ type: "set_user", user: myUsername }));
+    if(ws && ws.readyState === 1) ws.send(JSON.stringify({ type: "set_user", user: myUsername }));
 });
 
 function switchScreen(id) {
@@ -201,12 +283,17 @@ function renderPublicRooms(rooms) {
 
 function generateRoom() {
     const name = document.getElementById('roomName').value || `${myUsername}'s Room`;
-    ws.send(JSON.stringify({
-        type: "create_room",
-        name: name,
-        max: document.getElementById('playerCount').value,
-        privacy: document.getElementById('roomPrivacy').value
-    }));
+    if(ws && ws.readyState === 1) {
+        ws.send(JSON.stringify({
+            type: "create_room",
+            name: name,
+            max: document.getElementById('playerCount').value,
+            privacy: document.getElementById('roomPrivacy').value
+        }));
+    } else {
+        currentRoom = "LOCAL";
+        switchScreen('dashboard');
+    }
 }
 
 function joinWithCode() {
@@ -214,7 +301,7 @@ function joinWithCode() {
 }
 
 function joinRoom(code) {
-    ws.send(JSON.stringify({ type: "join_room", code: code }));
+    if(ws && ws.readyState === 1) ws.send(JSON.stringify({ type: "join_room", code: code }));
 }
 
 function setupLobby(code) {
@@ -226,27 +313,31 @@ function setupLobby(code) {
 }
 
 function requestStart() {
-    ws.send(JSON.stringify({ type: "start_game" }));
+    if(ws && ws.readyState === 1) ws.send(JSON.stringify({ type: "start_game" }));
 }
 
 function leaveRoom() {
-    ws.send(JSON.stringify({ type: "leave_room" }));
+    if(ws && ws.readyState === 1) ws.send(JSON.stringify({ type: "leave_room" }));
     currentRoom = null;
     isHost = false;
     document.getElementById('chatMessages').innerHTML = '';
+    closeGame();
     switchScreen('home');
 }
 
 function sendChatMessage() {
     const input = document.getElementById('chatInput');
     if (!input.value.trim()) return;
-    ws.send(JSON.stringify({ type: "chat", text: input.value.trim() }));
+    if(ws && ws.readyState === 1) {
+        ws.send(JSON.stringify({ type: "chat", text: input.value.trim() }));
+    } else {
+        renderChat([{sender: myUsername, text: input.value.trim()}]);
+    }
     input.value = '';
 }
 
 function renderChat(messages) {
     const container = document.getElementById('chatMessages');
-    container.innerHTML = '';
     messages.forEach(msg => {
         const isSelf = msg.sender === myUsername;
         const div = document.createElement('div');
@@ -255,6 +346,212 @@ function renderChat(messages) {
         container.appendChild(div);
     });
     container.scrollTop = container.scrollHeight;
+}
+
+let gameLoop;
+function openGame(game) {
+    document.querySelectorAll('.game-view').forEach(v => v.classList.remove('active'));
+    document.getElementById(`game-${game}`).classList.add('active');
+    
+    if (game === 'snake') initSnake();
+    if (game === 'ttt') initTTT();
+    if (game === 'rps') initRPS();
+    if (game === 'memory') initMemory();
+    if (game === 'trivia') initTrivia();
+}
+
+function closeGame() {
+    clearInterval(gameLoop);
+    document.querySelectorAll('.game-view').forEach(v => v.classList.remove('active'));
+    document.getElementById('gamesMenu').classList.add('active');
+}
+
+let sGrid = 15, sSnake = [], sFood = {}, sDx = sGrid, sDy = 0, sScore = 0;
+const sCanvas = document.getElementById('snakeCanvas');
+const sCtx = sCanvas.getContext('2d');
+
+function initSnake() {
+    sSnake = [{x: 150, y: 150}];
+    sDx = sGrid; sDy = 0; sScore = 0;
+    document.getElementById('snakeScore').innerText = sScore;
+    placeFood();
+    clearInterval(gameLoop);
+    gameLoop = setInterval(updateSnake, 100);
+}
+
+function placeFood() {
+    sFood.x = Math.floor(Math.random() * (sCanvas.width / sGrid)) * sGrid;
+    sFood.y = Math.floor(Math.random() * (sCanvas.height / sGrid)) * sGrid;
+}
+
+function updateSnake() {
+    const head = {x: sSnake[0].x + sDx, y: sSnake[0].y + sDy};
+    if (head.x < 0 || head.x >= sCanvas.width || head.y < 0 || head.y >= sCanvas.height) return initSnake();
+    for (let i=0; i<sSnake.length; i++) if (head.x === sSnake[i].x && head.y === sSnake[i].y) return initSnake();
+    
+    sSnake.unshift(head);
+    if (head.x === sFood.x && head.y === sFood.y) {
+        sScore += 10;
+        document.getElementById('snakeScore').innerText = sScore;
+        placeFood();
+    } else {
+        sSnake.pop();
+    }
+    
+    sCtx.fillStyle = '#111';
+    sCtx.fillRect(0, 0, sCanvas.width, sCanvas.height);
+    sCtx.fillStyle = '#ff4444';
+    sCtx.fillRect(sFood.x, sFood.y, sGrid - 2, sGrid - 2);
+    sCtx.fillStyle = '#44ff44';
+    sSnake.forEach((p, i) => {
+        if(i===0) sCtx.fillStyle = '#fff';
+        else sCtx.fillStyle = '#44ff44';
+        sCtx.fillRect(p.x, p.y, sGrid - 2, sGrid - 2);
+    });
+}
+
+document.addEventListener('keydown', e => {
+    if (document.getElementById('game-snake').classList.contains('active')) {
+        if (e.key === 'ArrowUp' && sDy === 0) { sDx = 0; sDy = -sGrid; e.preventDefault(); }
+        if (e.key === 'ArrowDown' && sDy === 0) { sDx = 0; sDy = sGrid; e.preventDefault(); }
+        if (e.key === 'ArrowLeft' && sDx === 0) { sDx = -sGrid; sDy = 0; e.preventDefault(); }
+        if (e.key === 'ArrowRight' && sDx === 0) { sDx = sGrid; sDy = 0; e.preventDefault(); }
+    }
+});
+
+let tBoard = [], tTurn = 'X', tActive = true;
+function initTTT() {
+    tBoard = ['','','','','','','','',''];
+    tTurn = 'X';
+    tActive = true;
+    document.getElementById('tttMessage').innerText = "Player X Turn";
+    const container = document.getElementById('tttBoard');
+    container.innerHTML = '';
+    for(let i=0; i<9; i++) {
+        const cell = document.createElement('div');
+        cell.className = 'ttt-cell';
+        cell.onclick = () => playTTT(i, cell);
+        container.appendChild(cell);
+    }
+}
+
+function playTTT(i, cell) {
+    if (!tActive || tBoard[i] !== '') return;
+    tBoard[i] = tTurn;
+    cell.innerText = tTurn;
+    cell.style.color = tTurn === 'X' ? '#ff4444' : '#4444ff';
+    if (checkTTTWin()) {
+        document.getElementById('tttMessage').innerText = `Player ${tTurn} Wins!`;
+        tActive = false;
+    } else if (!tBoard.includes('')) {
+        document.getElementById('tttMessage').innerText = "It's a Draw!";
+        tActive = false;
+    } else {
+        tTurn = tTurn === 'X' ? 'O' : 'X';
+        document.getElementById('tttMessage').innerText = `Player ${tTurn} Turn`;
+    }
+}
+
+function checkTTTWin() {
+    const w = [[0,1,2],[3,4,5],[6,7,8],[0,3,6],[1,4,7],[2,5,8],[0,4,8],[2,4,6]];
+    return w.some(c => tBoard[c[0]] && tBoard[c[0]] === tBoard[c[1]] && tBoard[c[0]] === tBoard[c[2]]);
+}
+
+function initRPS() {
+    document.getElementById('rpsResult').innerText = '';
+    document.getElementById('rpsMessage').innerText = 'Make your choice!';
+}
+
+function playRPS(choice) {
+    const ops = ['🪨', '📄', '✂️'];
+    const p2 = ops[Math.floor(Math.random()*3)];
+    const p3 = ops[Math.floor(Math.random()*3)];
+    document.getElementById('rpsResult').innerText = `You: ${choice} | P2: ${p2} | P3: ${p3}`;
+    document.getElementById('rpsMessage').innerText = 'Round Complete!';
+}
+
+let mCards = [], mFlipped = [], mMatches = 0, mLock = false;
+function initMemory() {
+    mMatches = 0;
+    mFlipped = [];
+    mLock = false;
+    document.getElementById('memoryScore').innerText = '0';
+    const em = ['🍎','🍌','🍇','🍉','🍓','🍒','🍍','🥝'];
+    mCards = [...em, ...em].sort(() => Math.random() - 0.5);
+    const container = document.getElementById('memoryBoard');
+    container.innerHTML = '';
+    mCards.forEach((c, i) => {
+        const card = document.createElement('div');
+        card.className = 'memory-card';
+        card.dataset.val = c;
+        card.dataset.idx = i;
+        card.onclick = () => flipMemory(card);
+        container.appendChild(card);
+    });
+}
+
+function flipMemory(card) {
+    if (mLock || card.classList.contains('flipped')) return;
+    card.innerText = card.dataset.val;
+    card.classList.add('flipped');
+    mFlipped.push(card);
+    if (mFlipped.length === 2) {
+        mLock = true;
+        if (mFlipped[0].dataset.val === mFlipped[1].dataset.val) {
+            mMatches++;
+            document.getElementById('memoryScore').innerText = mMatches;
+            mFlipped = [];
+            mLock = false;
+        } else {
+            setTimeout(() => {
+                mFlipped[0].innerText = '';
+                mFlipped[0].classList.remove('flipped');
+                mFlipped[1].innerText = '';
+                mFlipped[1].classList.remove('flipped');
+                mFlipped = [];
+                mLock = false;
+            }, 1000);
+        }
+    }
+}
+
+const trQ = [
+    {q: "What does HTML stand for?", a: ["Hyper Text Markup Language", "Hot Mail", "How To Make Lasagna", "Hyperlinks Text"], c: 0},
+    {q: "Which is not a programming language?", a: ["Python", "HTML", "Java", "C++"], c: 1},
+    {q: "What is 8 x 8?", a: ["64", "56", "72", "48"], c: 0},
+    {q: "What planet is known as the Red Planet?", a: ["Venus", "Mars", "Jupiter", "Saturn"], c: 1}
+];
+let trIdx = 0, trScore = 0;
+
+function initTrivia() {
+    trIdx = 0;
+    trScore = 0;
+    document.getElementById('triviaScore').innerText = `Score: 0`;
+    loadTrivia();
+}
+
+function loadTrivia() {
+    if (trIdx >= trQ.length) {
+        document.getElementById('triviaQuestion').innerText = `Quiz Complete! Final Score: ${trScore}/${trQ.length}`;
+        document.getElementById('triviaOptions').innerHTML = '<button class="btn btn-primary" onclick="initTrivia()">Play Again</button>';
+        return;
+    }
+    const q = trQ[trIdx];
+    document.getElementById('triviaQuestion').innerText = q.q;
+    const opts = document.getElementById('triviaOptions');
+    opts.innerHTML = '';
+    q.a.forEach((ans, i) => {
+        const b = document.createElement('div');
+        b.className = 'trivia-opt';
+        b.innerText = ans;
+        b.onclick = () => {
+            if(i === q.c) trScore++;
+            trIdx++;
+            document.getElementById('triviaScore').innerText = `Score: ${trScore}`;
+            loadTrivia();
+        };
+        opts.appendChild(b);
+    });
 }
 </script>
 </body>

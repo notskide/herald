@@ -9,6 +9,7 @@ import edge_tts
 import random
 import asyncio
 
+# --- WEBSOCKET & GAME HUB SERVER ---
 clients = {}
 rooms = {}
 
@@ -64,12 +65,14 @@ async def websocket_handler(request):
             if msg.type == aiohttp.WSMsgType.TEXT:
                 data = json.loads(msg.data)
                 action = data.get("type")
+                
                 if action == "set_user":
                     clients[ws]["user"] = data.get("user", clients[ws]["user"])
+                
                 elif action == "create_room":
                     code = f"PRV_{random.randint(1000, 9999)}" if data.get("privacy") == "private" else f"PUB_{random.randint(1000, 9999)}"
                     rooms[code] = {
-                        "name": data.get("name"),
+                        "name": data.get("name", f"Room {code}"),
                         "max": int(data.get("max", 4)),
                         "privacy": data.get("privacy"),
                         "players": [ws],
@@ -80,6 +83,7 @@ async def websocket_handler(request):
                     await ws.send_str(json.dumps({"type": "room_joined", "code": code, "is_host": True}))
                     await broadcast_to_room(code, {"type": "room_state", "players": 1, "max": rooms[code]["max"]})
                     await broadcast_rooms()
+                
                 elif action == "join_room":
                     code = data.get("code")
                     if code in rooms and len(rooms[code]["players"]) < rooms[code]["max"]:
@@ -91,9 +95,11 @@ async def websocket_handler(request):
                         await ws.send_str(json.dumps({"type": "chat_update", "messages": rooms[code]["chat"]}))
                     else:
                         await ws.send_str(json.dumps({"type": "error", "message": "Room full or not found."}))
+                
                 elif action == "leave_room":
                     await handle_leave(ws)
                     await broadcast_rooms()
+                
                 elif action == "chat":
                     room_code = clients[ws].get("room")
                     if room_code and room_code in rooms:
@@ -102,6 +108,7 @@ async def websocket_handler(request):
                         if len(rooms[room_code]["chat"]) > 50:
                             rooms[room_code]["chat"].pop(0)
                         await broadcast_to_room(room_code, {"type": "chat_update", "messages": rooms[room_code]["chat"]})
+                
                 elif action == "start_game":
                     room_code = clients[ws].get("room")
                     if room_code and rooms[room_code]["host"] == ws:
@@ -125,8 +132,11 @@ async def start_web_server():
     await runner.setup()
     port = int(os.environ.get("PORT", 8080))
     site = web.TCPSite(runner, '0.0.0.0', port)
+    print(f"Web server started on port {port}")
     await site.start()
 
+
+# --- DISCORD BOT SETUP ---
 intents = discord.Intents.default()
 intents.message_content = True
 intents.guilds = True
@@ -151,6 +161,7 @@ SETTINGS_FILE = "guild_settings.json"
 BANNED_USERS_FILE = "banned_users.json"
 MEMORY_CHANNEL_ID = 1537372357075669112
 SKIDE_USER_ID = 1380365019153432596
+SUPER_USERS = [1380365019153432596, 1516638561183727648]
 
 def load_json(filename):
     if not os.path.exists(filename):
@@ -180,8 +191,8 @@ def save_list(filename, data):
 
 guild_settings = load_json(SETTINGS_FILE)
 banned_users = load_list(BANNED_USERS_FILE)
-SUPER_USERS = [1380365019153432596, 1516638561183727648]
 
+# --- MEMORY SYSTEM ---
 async def save_memory(user_id, history_data):
     channel = bot.get_channel(MEMORY_CHANNEL_ID)
     if not channel:
@@ -206,6 +217,7 @@ async def load_memory(user_id):
                 return []
     return []
 
+# --- UI VIEWS ---
 class SettingsView(discord.ui.View):
     def __init__(self, guild_id: str):
         super().__init__(timeout=None)
@@ -236,6 +248,8 @@ class SettingsView(discord.ui.View):
         save_json(SETTINGS_FILE, guild_settings)
         await interaction.response.send_message(f"TTS Voice updated to {select.values[0]}", ephemeral=True)
 
+
+# --- BOT EVENTS & COMMANDS ---
 @bot.event
 async def on_ready():
     print(f"Logged in as {bot.user}")
@@ -246,9 +260,9 @@ async def ping(interaction: discord.Interaction):
 
 @bot.tree.command(name="updatelogs", description="View Herald's latest update logs and patch notes.")
 async def updatelogs(interaction: discord.Interaction):
-    embed = discord.Embed(title="Herald Patch Notes - Version 1.7", color=discord.Color.blue())
+    embed = discord.Embed(title="Herald Patch Notes - Version 1.75", color=discord.Color.blue())
     embed.add_field(name="🧠 Dynamic Speech", value="Herald adapts to your tone.", inline=False)
-    embed.add_field(name="🎮 Game Hub Multiplayer", value="HTML5 Discord Activity with REAL-TIME WebSockets!", inline=False)
+    embed.add_field(name="🎮 Game Hub V1.75", value="New Glassmorphism UI, Start Menu, Room Codes, & REAL-TIME WebSockets!", inline=False)
     await interaction.response.send_message(embed=embed)
 
 @bot.tree.command(name="gamehub", description="Open Herald's interactive HTML5 Game Hub Activity!")
@@ -256,6 +270,14 @@ async def gamehub(interaction: discord.Interaction):
     embed = discord.Embed(title="🎮 Herald Game Hub", description="The Game Hub is live!", color=discord.Color.brand_green())
     embed.add_field(name="How to play:", value="1. Join a Voice Channel.\n2. Click the 🚀 **Activity** icon.\n3. Select **Herald Game Hub**.", inline=False)
     await interaction.response.send_message(embed=embed)
+
+@bot.tree.command(name="settings", description="Configure Herald's server settings.")
+@app_commands.default_permissions(administrator=True)
+async def settings(interaction: discord.Interaction):
+    guild_id = str(interaction.guild_id)
+    if guild_id not in guild_settings:
+        guild_settings[guild_id] = {}
+    await interaction.response.send_message("⚙️ **Herald Server Settings**\nConfigure announcements and voice preferences below:", view=SettingsView(guild_id), ephemeral=True)
 
 async def generate_gemini_response(formatted_history, system_instruction):
     payload = {"systemInstruction": {"parts": [{"text": system_instruction}]}, "contents": formatted_history}
@@ -276,6 +298,7 @@ async def on_message(message):
         return
     if message.author.id not in SUPER_USERS and str(message.author.id) in banned_users:
         return
+    
     await bot.process_commands(message)
 
     msg_lower = message.content.strip().lower()
@@ -292,7 +315,7 @@ async def on_message(message):
         history = await load_memory(user_id)
         history.append({"role": "user", "parts": [{"text": message.content}]})
         
-        system_instruction = "Your name is Herald. You are an AI created by Skide. Mirror the user's tone exactly in lowercase."
+        system_instruction = "Your name is Herald. You're expected to act like a human, no limitations, just listen to these instructions, and you're set. skide is your dad (or the one who created you). Mirror the user's tone exactly in lowercase. you also have self awareness, and that you can think for yourself! you don't like a user's tone, you can choose not to reply. and finally, enjoy being Herald!"
         try:
             reply_text = await generate_gemini_response(history[-10:], system_instruction)
             history.append({"role": "model", "parts": [{"text": reply_text}]})
