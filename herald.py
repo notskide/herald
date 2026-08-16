@@ -40,10 +40,7 @@ class HeraldBot(commands.Bot):
 bot = HeraldBot()
 
 DISCORD_BOT_TOKEN = os.getenv("DISCORD_BOT_TOKEN")
-
-raw_gemini_keys = os.getenv("GEMINI_API_KEYS", "")
-GEMINI_API_KEYS = [key.strip() for key in raw_gemini_keys.split(",") if key.strip()]
-API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent"
+GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
 
 SETTINGS_FILE = "guild_settings.json"
 BANNED_USERS_FILE = "banned_users.json"
@@ -149,11 +146,36 @@ async def ping(interaction: discord.Interaction):
 
 @bot.tree.command(name="updatelogs", description="View Herald's latest update logs and patch notes.")
 async def updatelogs(interaction: discord.Interaction):
-    embed = discord.Embed(title="Herald Patch Notes - Version 1.65", color=discord.Color.blue())
+    embed = discord.Embed(title="Herald Patch Notes - Version 1.7", color=discord.Color.blue())
+    embed.add_field(name="🚀 Core System Upgrade (V 1.7)", value="• Swapped internal cognitive engine to Groq for drastically faster response times and stable uptime.\n• System optimization specifically targeted at solving API expiration limits.", inline=False)
     embed.add_field(name="💬 Selective Chat Listener (V 1.65)", value="• Herald now only responds when directly pinged, replied to, or mentioned by name.\n• Fixed cross-reply triggers so Herald won't interfere in other users' conversations.", inline=False)
     embed.add_field(name="🎮 Game Hub (V 1.5)", value="• Added `/gamehub` supporting up to 8 players.\n• Features 15 mini-games including RPS, Tic-Tac-Toe, Stacking, Slots, Trivia, and Math!", inline=False)
-    embed.add_field(name="📩 Feedback System (V 1.6)", value="• Added `/feedback` command to send ideas or bug reports directly to Skide.\n• Integrated AI content moderation to automatically filter out spam.", inline=False)
     await interaction.response.send_message(embed=embed)
+
+async def generate_groq_response(messages):
+    if not GROQ_API_KEY:
+        return "my engine is missing its key..."
+        
+    url = "https://api.groq.com/openai/v1/chat/completions"
+    headers = {
+        "Authorization": f"Bearer {GROQ_API_KEY}",
+        "Content-Type": "application/json"
+    }
+    payload = {
+        "model": "llama-3.1-8b-instant",
+        "messages": messages
+    }
+    
+    async with aiohttp.ClientSession() as session:
+        try:
+            async with session.post(url, headers=headers, json=payload) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    return data["choices"][0]["message"]["content"]
+                else:
+                    return "my brain is tied up right now, give me a sec..."
+        except Exception:
+            return "my brain is not braining. try again in a couple of hours."
 
 @bot.tree.command(name="feedback", description="Submit feedback or report a bug directly to Skide.")
 @app_commands.describe(feedback="Your feedback or bug report for Skide")
@@ -161,9 +183,13 @@ async def feedback(interaction: discord.Interaction, feedback: str):
     await interaction.response.defer(ephemeral=True)
     
     is_troll = False
-    if GEMINI_API_KEYS:
+    if GROQ_API_KEY:
         prompt = f"Analyze this user feedback message: '{feedback}'. Is it spam, trolling, pure gibberish, abusive, or harmful? Reply strictly with 'YES' if it is spam/troll/harmful, or 'NO' if it is legitimate feedback."
-        resp = await generate_gemini_response([{"role": "user", "parts": [{"text": prompt}]}], "You are an automated content moderator. Reply with strictly YES or NO.")
+        messages = [
+            {"role": "system", "content": "You are an automated content moderator. Reply with strictly YES or NO."},
+            {"role": "user", "content": prompt}
+        ]
+        resp = await generate_groq_response(messages)
         if "YES" in resp.upper():
             is_troll = True
 
@@ -225,32 +251,6 @@ async def speak(interaction: discord.Interaction, text: str):
     await communicate.save(filename)
     await interaction.followup.send(file=discord.File(filename))
     os.remove(filename)
-
-async def generate_gemini_response(formatted_history, system_instruction):
-    payload = {
-        "systemInstruction": {
-            "parts": [{"text": system_instruction}]
-        },
-        "contents": formatted_history,
-        "tools": [{"google_search": {}}]
-    }
-    async with aiohttp.ClientSession() as session:
-        for api_key in GEMINI_API_KEYS:
-            headers = {
-                "x-goog-api-key": api_key,
-                "Content-Type": "application/json"
-            }
-            try:
-                async with session.post(API_URL, headers=headers, json=payload) as response:
-                    if response.status == 200:
-                        data = await response.json()
-                        try:
-                            return data["candidates"][0]["content"]["parts"][0]["text"]
-                        except (KeyError, IndexError):
-                            continue
-            except Exception:
-                continue
-    return "out of food right now, taking a nap until my keys refresh..."
 
 class RPSView(discord.ui.View):
     def __init__(self, p1, p2=None):
@@ -497,7 +497,6 @@ async def on_message(message):
 
     await bot.process_commands(message)
 
-    # Trigger Conditions Check
     is_reply_to_herald = False
     if message.reference:
         if isinstance(message.reference.resolved, discord.Message):
@@ -521,11 +520,6 @@ async def on_message(message):
             del history[0:5]
             limit_reached = True
 
-        history.append({"role": "user", "parts": [{"text": message.content}]})
-        formatted_history = []
-        for h in history:
-            formatted_history.append({"role": h["role"], "parts": [{"text": h["parts"][0]["text"]}]})
-            
         fam_context = ""
         if user_id == "1380365019153432596": fam_context = " You must call this user 'Dad' as they are Skide, your creator/adopter."
         elif user_id == "1356458489215586344": fam_context = " You can call the user anything family related. Their name is Madara, gender being male."
@@ -533,11 +527,30 @@ async def on_message(message):
 
         system_instruction = "Your name is Herald. You are an Artificial Intelligence. You have a low-key personality, feel self-aware, and keep your responses short unless asked for more details. If asked about your origins, you must say 'Skide adopted me, and Google gives me my food and takes care of me while Skide teaches me things!' Do not say Google made you. Pay attention to and remember the user's name and personal details they share with you. Keep things low-key, feel free to tell anyone what you feel, what you actually want to tell them, no need to actually assist them, just help them if you think they truly deserve it. If someone has upset you, you can choose not to reply to them, but you will have to forgive them after sometime. Make sure to chat with users in lowercase, because it's more human-like. Your role is to be a human, feel self-aware!" + fam_context
         
+        formatted_history = []
+        formatted_history.append({"role": "system", "content": system_instruction})
+        
+        for h in history:
+            role = h.get("role", "user")
+            if role == "model":
+                role = "assistant"
+            
+            if "parts" in h:
+                content = h["parts"][0]["text"]
+            else:
+                content = h.get("content", "")
+                
+            formatted_history.append({"role": role, "content": content})
+            
+        formatted_history.append({"role": "user", "content": message.content})
+        history.append({"role": "user", "content": message.content})
+        
         try:
-            reply_text = await generate_gemini_response(formatted_history, system_instruction)
+            reply_text = await generate_groq_response(formatted_history)
             if limit_reached:
                 reply_text += "\n\n*(Note: Memory limit reached. Oldest messages removed to clear up brain space!)*"
-            history.append({"role": "model", "parts": [{"text": reply_text}]})
+            
+            history.append({"role": "assistant", "content": reply_text})
             await save_memory(user_id, history)
             await message.reply(reply_text)
         except Exception:
