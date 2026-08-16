@@ -163,7 +163,7 @@ canvas { background: #111; border: 2px solid #555; border-radius: 4px; }
                     </div>
                     <div id="tttMessage" style="font-size: 1.2rem;">Player X Turn</div>
                     <div class="ttt-board" id="tttBoard"></div>
-                    <button class="btn btn-primary" onclick="requestTTTRestart()" style="width:200px;">Restart</button>
+                    <button class="btn btn-primary" onclick="initTTT()" style="width:200px;">Restart</button>
                 </div>
 
                 <div id="game-rps" class="game-view">
@@ -222,7 +222,6 @@ document.getElementById('usernameInput').value = myUsername;
 
 let currentRoom = null;
 let isHost = false;
-let chatHistory = [];
 
 if(ws) {
     ws.onmessage = (event) => {
@@ -237,10 +236,10 @@ if(ws) {
         } else if (data.type === 'room_state') {
             document.getElementById('playerCounter').innerText = `${data.players} / ${data.max}`;
             document.getElementById('dashPlayerInfo').innerText = `Players: ${data.players}/${data.max}`;
-            if (data.host) {
-                isHost = true;
-                document.getElementById('startGameBtn').style.display = 'block';
-                document.getElementById('lobbyTitle').innerText = "Host Lobby";
+            if (data.host !== undefined) {
+                isHost = data.host;
+                document.getElementById('startGameBtn').style.display = isHost ? 'block' : 'none';
+                document.getElementById('lobbyTitle').innerText = isHost ? "Host Lobby" : "Waiting for host...";
             }
         } else if (data.type === 'chat_update') {
             renderChat(data.messages);
@@ -249,22 +248,9 @@ if(ws) {
             switchScreen('dashboard');
         } else if (data.type === 'error') {
             alert(data.message);
-        } else if (data.type === 'game_sync') {
-            handleGameSync(data);
         }
     };
 }
-
-setInterval(() => {
-    if(ws && ws.readyState === 1) {
-        if(document.getElementById('joinRoom').classList.contains('active')) {
-            ws.send(JSON.stringify({ type: "poll_rooms" }));
-        }
-        if((document.getElementById('lobby').classList.contains('active') || document.getElementById('dashboard').classList.contains('active')) && currentRoom) {
-            ws.send(JSON.stringify({ type: "poll_room_state", code: currentRoom }));
-        }
-    }
-}, 100);
 
 document.getElementById('usernameInput').addEventListener('input', (e) => {
     myUsername = e.target.value;
@@ -335,7 +321,6 @@ function leaveRoom() {
     currentRoom = null;
     isHost = false;
     document.getElementById('chatMessages').innerHTML = '';
-    chatHistory = [];
     closeGame();
     switchScreen('home');
 }
@@ -346,8 +331,7 @@ function sendChatMessage() {
     if(ws && ws.readyState === 1) {
         ws.send(JSON.stringify({ type: "chat", text: input.value.trim() }));
     } else {
-        chatHistory.push({sender: myUsername, text: input.value.trim()});
-        renderChat(chatHistory);
+        renderChat([{sender: myUsername, text: input.value.trim()}]);
     }
     input.value = '';
 }
@@ -365,29 +349,13 @@ function renderChat(messages) {
     container.scrollTop = container.scrollHeight;
 }
 
-function handleGameSync(data) {
-    if (data.game === 'ttt') {
-        if (data.action === 'restart') {
-            initTTT(true);
-        } else {
-            tBoard = data.board;
-            tTurn = data.turn;
-            tActive = data.active;
-            syncTTTBoard();
-        }
-    } else if (data.game === 'rps') {
-        document.getElementById('rpsResult').innerText = data.resultText;
-        document.getElementById('rpsMessage').innerText = data.messageText;
-    }
-}
-
 let gameLoop;
 function openGame(game) {
     document.querySelectorAll('.game-view').forEach(v => v.classList.remove('active'));
     document.getElementById(`game-${game}`).classList.add('active');
     
     if (game === 'snake') initSnake();
-    if (game === 'ttt') initTTT(false);
+    if (game === 'ttt') initTTT();
     if (game === 'rps') initRPS();
     if (game === 'memory') initMemory();
     if (game === 'trivia') initTrivia();
@@ -453,7 +421,7 @@ document.addEventListener('keydown', e => {
 });
 
 let tBoard = [], tTurn = 'X', tActive = true;
-function initTTT(isRemote = false) {
+function initTTT() {
     tBoard = ['','','','','','','','',''];
     tTurn = 'X';
     tActive = true;
@@ -468,19 +436,11 @@ function initTTT(isRemote = false) {
     }
 }
 
-function requestTTTRestart() {
-    initTTT(false);
-    if(ws && ws.readyState === 1) {
-        ws.send(JSON.stringify({ type: "game_action", game: "ttt", action: "restart" }));
-    }
-}
-
 function playTTT(i, cell) {
     if (!tActive || tBoard[i] !== '') return;
     tBoard[i] = tTurn;
     cell.innerText = tTurn;
     cell.style.color = tTurn === 'X' ? '#ff4444' : '#4444ff';
-    
     if (checkTTTWin()) {
         document.getElementById('tttMessage').innerText = `Player ${tTurn} Wins!`;
         tActive = false;
@@ -489,27 +449,6 @@ function playTTT(i, cell) {
         tActive = false;
     } else {
         tTurn = tTurn === 'X' ? 'O' : 'X';
-        document.getElementById('tttMessage').innerText = `Player ${tTurn} Turn`;
-    }
-
-    if(ws && ws.readyState === 1) {
-        ws.send(JSON.stringify({ type: "game_action", game: "ttt", board: tBoard, turn: tTurn, active: tActive }));
-    }
-}
-
-function syncTTTBoard() {
-    const cells = document.querySelectorAll('.ttt-cell');
-    cells.forEach((cell, i) => {
-        cell.innerText = tBoard[i];
-        cell.style.color = tBoard[i] === 'X' ? '#ff4444' : '#4444ff';
-    });
-    if (!tActive) {
-        if (checkTTTWin()) {
-            document.getElementById('tttMessage').innerText = `Player ${tTurn === 'X' ? 'O' : 'X'} Wins!`;
-        } else {
-            document.getElementById('tttMessage').innerText = "It's a Draw!";
-        }
-    } else {
         document.getElementById('tttMessage').innerText = `Player ${tTurn} Turn`;
     }
 }
@@ -528,15 +467,8 @@ function playRPS(choice) {
     const ops = ['🪨', '📄', '✂️'];
     const p2 = ops[Math.floor(Math.random()*3)];
     const p3 = ops[Math.floor(Math.random()*3)];
-    const res = `You: ${choice} | P2: ${p2} | P3: ${p3}`;
-    const msg = 'Round Complete!';
-    
-    document.getElementById('rpsResult').innerText = res;
-    document.getElementById('rpsMessage').innerText = msg;
-
-    if(ws && ws.readyState === 1) {
-        ws.send(JSON.stringify({ type: "game_action", game: "rps", resultText: res, messageText: msg }));
-    }
+    document.getElementById('rpsResult').innerText = `You: ${choice} | P2: ${p2} | P3: ${p3}`;
+    document.getElementById('rpsMessage').innerText = 'Round Complete!';
 }
 
 let mCards = [], mFlipped = [], mMatches = 0, mLock = false;
