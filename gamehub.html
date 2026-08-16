@@ -1,0 +1,524 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Herald Game Hub</title>
+  <script src="https://cdn.jsdelivr.net/npm/@discord/embedded-app-sdk@1"></script>
+  <style>
+    :root {
+      --bg-main: #313338;
+      --bg-card: #2b2d31;
+      --bg-dark: #1e1f22;
+      --accent: #5865f2;
+      --accent-hover: #4752c4;
+      --text-main: #f2f3f5;
+      --text-muted: #949ba4;
+      --success: #23a559;
+      --danger: #da373c;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      font-family: 'gg sans', 'Helvetica Neue', Helvetica, Arial, sans-serif;
+    }
+
+    body {
+      background-color: var(--bg-main);
+      color: var(--text-main);
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+      overflow: hidden;
+      user-select: none;
+    }
+
+    header {
+      background-color: var(--bg-dark);
+      padding: 1rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+      z-index: 10;
+    }
+
+    .brand {
+      font-weight: 800;
+      font-size: 1.25rem;
+      color: var(--text-main);
+    }
+
+    .lobby-info {
+      font-size: 0.875rem;
+      color: var(--text-muted);
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .avatar {
+      width: 24px;
+      height: 24px;
+      border-radius: 50%;
+      background-color: var(--accent);
+    }
+
+    #app-container {
+      flex: 1;
+      overflow-y: auto;
+      padding: 1.5rem;
+      position: relative;
+    }
+
+    .view {
+      display: none;
+      height: 100%;
+      flex-direction: column;
+      align-items: center;
+    }
+
+    .view.active {
+      display: flex;
+    }
+
+    .dashboard {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 1.5rem;
+      width: 100%;
+      max-width: 1000px;
+      margin: 0 auto;
+    }
+
+    .game-card {
+      background-color: var(--bg-card);
+      border-radius: 12px;
+      padding: 1.5rem;
+      cursor: pointer;
+      transition: transform 0.2s, background-color 0.2s;
+      border: 1px solid var(--bg-dark);
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+    }
+
+    .game-card:hover {
+      transform: translateY(-4px);
+      background-color: #35373c;
+    }
+
+    .game-title {
+      font-size: 1.25rem;
+      font-weight: bold;
+      margin-bottom: 0.5rem;
+    }
+
+    .game-desc {
+      color: var(--text-muted);
+      font-size: 0.9rem;
+      margin-bottom: 1.5rem;
+    }
+
+    .game-meta {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 0.85rem;
+      font-weight: bold;
+    }
+
+    .player-count {
+      background-color: var(--bg-dark);
+      padding: 4px 8px;
+      border-radius: 4px;
+      color: var(--accent);
+    }
+
+    .btn {
+      background-color: var(--accent);
+      color: white;
+      border: none;
+      padding: 0.5rem 1rem;
+      border-radius: 4px;
+      font-weight: bold;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+
+    .btn:hover { background-color: var(--accent-hover); }
+    .btn-secondary { background-color: var(--bg-dark); }
+    .btn-secondary:hover { background-color: #27292e; }
+
+    .game-header {
+      width: 100%;
+      max-width: 600px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 1.5rem;
+    }
+
+    #snake-canvas {
+      background-color: var(--bg-dark);
+      border: 2px solid var(--bg-card);
+      border-radius: 8px;
+      max-width: 100%;
+    }
+
+    .d-pad {
+      display: none;
+      grid-template-columns: repeat(3, 60px);
+      grid-template-rows: repeat(3, 60px);
+      gap: 5px;
+      margin-top: 20px;
+    }
+    
+    @media (max-width: 768px) {
+      .d-pad { display: grid; }
+    }
+
+    .d-btn {
+      background-color: var(--bg-card);
+      border: none;
+      border-radius: 8px;
+      color: white;
+      font-size: 1.5rem;
+    }
+    .d-btn:active { background-color: var(--accent); }
+    .up { grid-column: 2; grid-row: 1; }
+    .left { grid-column: 1; grid-row: 2; }
+    .right { grid-column: 3; grid-row: 2; }
+    .down { grid-column: 2; grid-row: 3; }
+
+    .ttt-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 100px);
+      grid-template-rows: repeat(3, 100px);
+      gap: 10px;
+    }
+    .ttt-cell {
+      background-color: var(--bg-card);
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 3rem;
+      font-weight: bold;
+      cursor: pointer;
+    }
+    .ttt-cell:hover { background-color: var(--bg-dark); }
+
+    .status-msg {
+      margin: 1rem 0;
+      padding: 1rem;
+      background-color: var(--bg-card);
+      border-radius: 8px;
+      text-align: center;
+      width: 100%;
+      max-width: 600px;
+    }
+  </style>
+</head>
+<body>
+
+  <header>
+    <div class="brand">Herald Hub</div>
+    <div class="lobby-info">
+      <span id="session-status">Connecting to Discord...</span>
+      <div id="user-avatar" class="avatar"></div>
+    </div>
+  </header>
+
+  <div id="app-container">
+    
+    <div id="view-hub" class="view active">
+      <div class="dashboard">
+        
+        <div class="game-card" onclick="switchView('view-snake')">
+          <div>
+            <div class="game-title">🐍 Classic Snake</div>
+            <div class="game-desc">Navigate the grid, eat the apples, and avoid your own tail. Local high score tracking.</div>
+          </div>
+          <div class="game-meta">
+            <span class="player-count">1/1 Player</span>
+            <button class="btn">Play Solo</button>
+          </div>
+        </div>
+
+        <div class="game-card" onclick="switchView('view-ttt')">
+          <div>
+            <div class="game-title">❌ Tic-Tac-Toe ⭕</div>
+            <div class="game-desc">Classic 3x3 grid showdown. Real-time turn switching and win detection.</div>
+          </div>
+          <div class="game-meta">
+            <span class="player-count" id="count-ttt">0/2 Players</span>
+            <button class="btn">Join Lobby</button>
+          </div>
+        </div>
+
+        <div class="game-card" onclick="switchView('view-rps')">
+          <div>
+            <div class="game-title">✂️ Rock Paper Scissors</div>
+            <div class="game-desc">Simultaneous 3-player showdown mode. Lock in your choice and see who survives.</div>
+          </div>
+          <div class="game-meta">
+            <span class="player-count" id="count-rps">0/3 Players</span>
+            <button class="btn">Join Lobby</button>
+          </div>
+        </div>
+
+        <div class="game-card" onclick="switchView('view-memory')">
+          <div>
+            <div class="game-title">🃏 Memory Flip</div>
+            <div class="game-desc">Turn-based 4-player matching game with emoji pairs. Find the most matches to win.</div>
+          </div>
+          <div class="game-meta">
+            <span class="player-count" id="count-memory">0/4 Players</span>
+            <button class="btn">Join Lobby</button>
+          </div>
+        </div>
+
+        <div class="game-card" onclick="switchView('view-trivia')">
+          <div>
+            <div class="game-title">🧠 Trivia Quiz</div>
+            <div class="game-desc">Live party mode for up to 8 players. Answer fast, watch the live leaderboard.</div>
+          </div>
+          <div class="game-meta">
+            <span class="player-count" id="count-trivia">0/8 Players</span>
+            <button class="btn">Join Lobby</button>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <div id="view-snake" class="view">
+      <div class="game-header">
+        <button class="btn btn-secondary" onclick="switchView('view-hub')">← Back to Hub</button>
+        <h2>Snake</h2>
+        <div style="font-weight: bold;">Score: <span id="snake-score">0</span></div>
+      </div>
+      <canvas id="snake-canvas" width="400" height="400"></canvas>
+      
+      <div class="d-pad">
+        <button class="d-btn up" onclick="snakeSetDir(0, -1)">↑</button>
+        <button class="d-btn left" onclick="snakeSetDir(-1, 0)">←</button>
+        <button class="d-btn right" onclick="snakeSetDir(1, 0)">→</button>
+        <button class="d-btn down" onclick="snakeSetDir(0, 1)">↓</button>
+      </div>
+    </div>
+
+    <div id="view-ttt" class="view">
+      <div class="game-header">
+        <button class="btn btn-secondary" onclick="switchView('view-hub')">← Back to Hub</button>
+        <h2>Tic-Tac-Toe</h2>
+        <div style="font-weight: bold;">Room ID: <span class="room-id-display">--</span></div>
+      </div>
+      <div class="status-msg" id="ttt-status">Waiting for Player 2...</div>
+      <div class="ttt-grid">
+        <div class="ttt-cell" onclick="handleTTTClick(0)"></div>
+        <div class="ttt-cell" onclick="handleTTTClick(1)"></div>
+        <div class="ttt-cell" onclick="handleTTTClick(2)"></div>
+        <div class="ttt-cell" onclick="handleTTTClick(3)"></div>
+        <div class="ttt-cell" onclick="handleTTTClick(4)"></div>
+        <div class="ttt-cell" onclick="handleTTTClick(5)"></div>
+        <div class="ttt-cell" onclick="handleTTTClick(6)"></div>
+        <div class="ttt-cell" onclick="handleTTTClick(7)"></div>
+        <div class="ttt-cell" onclick="handleTTTClick(8)"></div>
+      </div>
+    </div>
+
+    <div id="view-rps" class="view">
+      <div class="game-header">
+        <button class="btn btn-secondary" onclick="switchView('view-hub')">← Back to Hub</button>
+        <h2>Rock Paper Scissors</h2>
+        <div style="font-weight: bold;">Room ID: <span class="room-id-display">--</span></div>
+      </div>
+      <div class="status-msg">Waiting for 3 players to join...</div>
+      <div style="display: flex; gap: 10px;">
+        <button class="btn" style="font-size: 2rem; padding: 1rem;">🪨</button>
+        <button class="btn" style="font-size: 2rem; padding: 1rem;">📄</button>
+        <button class="btn" style="font-size: 2rem; padding: 1rem;">✂️</button>
+      </div>
+    </div>
+
+    <div id="view-memory" class="view">
+      <div class="game-header">
+        <button class="btn btn-secondary" onclick="switchView('view-hub')">← Back to Hub</button>
+        <h2>Memory Flip</h2>
+        <div style="font-weight: bold;">Room ID: <span class="room-id-display">--</span></div>
+      </div>
+      <div class="status-msg">4-Player Grid initializing...</div>
+    </div>
+
+    <div id="view-trivia" class="view">
+      <div class="game-header">
+        <button class="btn btn-secondary" onclick="switchView('view-hub')">← Back to Hub</button>
+        <h2>Trivia Quiz</h2>
+        <div style="font-weight: bold;">Room ID: <span class="room-id-display">--</span></div>
+      </div>
+      <div class="status-msg">Waiting for Host to start... (0/8)</div>
+    </div>
+
+  </div>
+
+  <script>
+    const discordSdk = new Discord.DiscordSDK(clientId = 'YOUR_CLIENT_ID_HERE');
+    let ws;
+    let roomInstanceId = "local-dev-room";
+    let currentUser = null;
+
+    async function initActivity() {
+      try {
+        await discordSdk.ready();
+        document.getElementById('session-status').innerText = "Authorized";
+        
+        roomInstanceId = discordSdk.instanceId || roomInstanceId;
+        document.querySelectorAll('.room-id-display').forEach(el => el.innerText = roomInstanceId.substring(0,6));
+
+        const participants = await discordSdk.commands.getInstanceConnectedParticipants();
+        console.log("Connected participants:", participants);
+
+        initWebSocket();
+      } catch (err) {
+        console.error("SDK Error:", err);
+        document.getElementById('session-status').innerText = "Local Mode";
+      }
+    }
+
+    function initWebSocket() {
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      ws = new WebSocket(`${protocol}//${window.location.host}/ws?room=${roomInstanceId}`);
+
+      ws.onopen = () => console.log("WebSocket connected to room:", roomInstanceId);
+      
+      ws.onmessage = (event) => {
+        const data = JSON.parse(event.data);
+        handleServerMessage(data);
+      };
+    }
+
+    function handleServerMessage(data) {
+      if (data.type === 'lobby_update') {
+        if(data.game === 'ttt') document.getElementById('count-ttt').innerText = `${data.count}/2 Players`;
+        if(data.game === 'rps') document.getElementById('count-rps').innerText = `${data.count}/3 Players`;
+        if(data.game === 'memory') document.getElementById('count-memory').innerText = `${data.count}/4 Players`;
+        if(data.game === 'trivia') document.getElementById('count-trivia').innerText = `${data.count}/8 Players`;
+      }
+    }
+
+    let currentInterval = null;
+
+    function switchView(viewId) {
+      document.querySelectorAll('.view').forEach(el => el.classList.remove('active'));
+      document.getElementById(viewId).classList.add('active');
+
+      if (currentInterval) clearInterval(currentInterval);
+
+      if (viewId === 'view-snake') initSnake();
+      if (viewId !== 'view-hub') {
+        if(ws && ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: 'join_game', game: viewId.replace('view-', '') }));
+        }
+      } else {
+        if(ws && ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: 'leave_game' }));
+        }
+      }
+    }
+
+    let snake, food, dx, dy, score;
+    const canvas = document.getElementById('snake-canvas');
+    const ctx = canvas.getContext('2d');
+    const gridSize = 20;
+
+    function initSnake() {
+      snake = [{x: 200, y: 200}];
+      dx = gridSize;
+      dy = 0;
+      score = 0;
+      document.getElementById('snake-score').innerText = score;
+      spawnFood();
+      currentInterval = setInterval(updateSnake, 100);
+    }
+
+    function spawnFood() {
+      food = {
+        x: Math.floor(Math.random() * (canvas.width / gridSize)) * gridSize,
+        y: Math.floor(Math.random() * (canvas.height / gridSize)) * gridSize
+      };
+    }
+
+    function snakeSetDir(newDx, newDy) {
+      if (newDx === 1 && dx === -gridSize) return;
+      if (newDx === -1 && dx === gridSize) return;
+      if (newDy === 1 && dy === -gridSize) return;
+      if (newDy === -1 && dy === gridSize) return;
+      dx = newDx * gridSize;
+      dy = newDy * gridSize;
+    }
+
+    document.addEventListener('keydown', (e) => {
+      if(document.getElementById('view-snake').classList.contains('active')) {
+        if (e.key === 'ArrowUp') snakeSetDir(0, -1);
+        if (e.key === 'ArrowDown') snakeSetDir(0, 1);
+        if (e.key === 'ArrowLeft') snakeSetDir(-1, 0);
+        if (e.key === 'ArrowRight') snakeSetDir(1, 0);
+      }
+    });
+
+    function updateSnake() {
+      const head = { x: snake[0].x + dx, y: snake[0].y + dy };
+
+      if (head.x < 0 || head.x >= canvas.width || head.y < 0 || head.y >= canvas.height) {
+        return initSnake();
+      }
+      
+      for (let i = 0; i < snake.length; i++) {
+        if (head.x === snake[i].x && head.y === snake[i].y) return initSnake();
+      }
+
+      snake.unshift(head);
+
+      if (head.x === food.x && head.y === food.y) {
+        score += 10;
+        document.getElementById('snake-score').innerText = score;
+        spawnFood();
+      } else {
+        snake.pop();
+      }
+
+      drawSnake();
+    }
+
+    function drawSnake() {
+      ctx.fillStyle = '#1e1f22';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      ctx.fillStyle = '#da373c';
+      ctx.fillRect(food.x, food.y, gridSize - 2, gridSize - 2);
+
+      ctx.fillStyle = '#23a559';
+      snake.forEach((part, index) => {
+        if(index === 0) ctx.fillStyle = '#5865f2';
+        else ctx.fillStyle = '#23a559';
+        ctx.fillRect(part.x, part.y, gridSize - 2, gridSize - 2);
+      });
+    }
+
+    function handleTTTClick(index) {
+      if(ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: 'ttt_move', cell: index }));
+      } else {
+        const cells = document.querySelectorAll('.ttt-cell');
+        if(!cells[index].innerText) cells[index].innerText = 'X';
+      }
+    }
+
+    initActivity();
+  </script>
+</body>
+</html>
