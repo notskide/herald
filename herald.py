@@ -171,7 +171,7 @@ async def generate_groq_response(messages):
             sanitized_messages.append({"role": role, "content": content})
 
     payload = {
-        "model": "llama-3.1-8b-instant",
+        "model": "llama-3.3-70b-versatile",
         "messages": sanitized_messages
     }
     
@@ -568,7 +568,7 @@ async def on_message(message):
             await save_memory(user_id, history)
             await message.reply(reply_text)
         except Exception:
-            await message.reply("i'm sorry, i got an http 404 error while processing your request.")
+            await message.reply("my brain broke, try again in a minute plz")
 
 if DISCORD_BOT_TOKEN:
     keep_alive()
