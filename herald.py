@@ -7,9 +7,7 @@ import aiohttp
 import edge_tts
 from flask import Flask
 from threading import Thread
-import random
 import asyncio
-import time
 
 app = Flask('')
 
@@ -40,7 +38,7 @@ class HeraldBot(commands.Bot):
 bot = HeraldBot()
 
 DISCORD_BOT_TOKEN = os.getenv("DISCORD_BOT_TOKEN")
-GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
+OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY")
 
 SETTINGS_FILE = "guild_settings.json"
 BANNED_USERS_FILE = "banned_users.json"
@@ -146,20 +144,19 @@ async def ping(interaction: discord.Interaction):
 
 @bot.tree.command(name="updatelogs", description="View Herald's latest update logs and patch notes.")
 async def updatelogs(interaction: discord.Interaction):
-    embed = discord.Embed(title="Herald Patch Notes - Version 1.7", color=discord.Color.blue())
-    embed.add_field(name="🚀 Core System Upgrade (V 1.7)", value="• Swapped internal cognitive engine to Groq for drastically faster response times and stable uptime.\n• System optimization specifically targeted at solving API expiration limits.", inline=False)
-    embed.add_field(name="💬 Selective Chat Listener (V 1.65)", value="• Herald now only responds when directly pinged, replied to, or mentioned by name.\n• Fixed cross-reply triggers so Herald won't interfere in other users' conversations.", inline=False)
-    embed.add_field(name="🎮 Game Hub (V 1.5)", value="• Added `/gamehub` supporting up to 8 players.\n• Features 15 mini-games including RPS, Tic-Tac-Toe, Stacking, Slots, Trivia, and Math!", inline=False)
+    embed = discord.Embed(title="Herald Patch Notes - Version 1.75.3", color=discord.Color.blue())
+    embed.add_field(name="🌐 OpenRouter Integration (V 1.75.3)", value="• Switched to OpenRouter API and patched the 2000-character text limit bug. Gamehub removed.", inline=False)
+    embed.add_field(name="🛡️ Model Fallback System (V 1.75.1)", value="• Added automatic model switching! If the main high-IQ model goes down or rate limits, Herald seamlessly switches to a backup brain.", inline=False)
+    embed.add_field(name="💬 Selective Chat Listener (V 1.65)", value="• Herald now only responds when directly pinged, replied to, or mentioned by name.", inline=False)
     await interaction.response.send_message(embed=embed)
 
-async def generate_groq_response(messages):
-    if not GROQ_API_KEY:
-        print("ERROR: GROQ_API_KEY environment variable is missing.")
+async def generate_ai_response(messages):
+    if not OPENROUTER_API_KEY:
         return "my engine is missing its key..."
         
-    url = "https://api.groq.com/openai/v1/chat/completions"
+    url = "https://openrouter.ai/api/v1/chat/completions"
     headers = {
-        "Authorization": f"Bearer {GROQ_API_KEY.strip()}",
+        "Authorization": f"Bearer {OPENROUTER_API_KEY.strip()}",
         "Content-Type": "application/json"
     }
     
@@ -170,24 +167,29 @@ async def generate_groq_response(messages):
         if content:
             sanitized_messages.append({"role": role, "content": content})
 
-    payload = {
-        "model": "llama-3.1-8b-instant",
-        "messages": sanitized_messages
-    }
+    models_to_try = [
+        "meta-llama/llama-3.1-70b-instruct",
+        "meta-llama/llama-3.1-8b-instruct",
+        "mistralai/mixtral-8x7b-instruct"
+    ]
     
     async with aiohttp.ClientSession() as session:
-        try:
-            async with session.post(url, headers=headers, json=payload) as response:
-                if response.status == 200:
-                    data = await response.json()
-                    return data["choices"][0]["message"]["content"]
-                else:
-                    err_body = await response.text()
-                    print(f"GROQ HTTP ERROR {response.status}: {err_body}")
-                    return "my brain is tied up right now, give me a sec..."
-        except Exception as e:
-            print(f"GROQ REQUEST EXCEPTION: {e}")
-            return "my brain is not braining. try again in a couple of hours."
+        for model_name in models_to_try:
+            payload = {
+                "model": model_name,
+                "messages": sanitized_messages
+            }
+            try:
+                async with session.post(url, headers=headers, json=payload) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        return data["choices"][0]["message"]["content"]
+                    else:
+                        continue
+            except Exception:
+                continue
+                
+        return "my brain is tied up right now, give me a sec..."
 
 @bot.tree.command(name="feedback", description="Submit feedback or report a bug directly to Skide.")
 @app_commands.describe(feedback="Your feedback or bug report for Skide")
@@ -195,13 +197,13 @@ async def feedback(interaction: discord.Interaction, feedback: str):
     await interaction.response.defer(ephemeral=True)
     
     is_troll = False
-    if GROQ_API_KEY:
+    if OPENROUTER_API_KEY:
         prompt = f"Analyze this user feedback message: '{feedback}'. Is it spam, trolling, pure gibberish, abusive, or harmful? Reply strictly with 'YES' if it is spam/troll/harmful, or 'NO' if it is legitimate feedback."
         messages = [
             {"role": "system", "content": "You are an automated content moderator. Reply with strictly YES or NO."},
             {"role": "user", "content": prompt}
         ]
-        resp = await generate_groq_response(messages)
+        resp = await generate_ai_response(messages)
         if "YES" in resp.upper():
             is_troll = True
 
@@ -263,184 +265,6 @@ async def speak(interaction: discord.Interaction, text: str):
     await communicate.save(filename)
     await interaction.followup.send(file=discord.File(filename))
     os.remove(filename)
-
-class RPSView(discord.ui.View):
-    def __init__(self, p1, p2=None):
-        super().__init__(timeout=60)
-        self.p1 = p1
-        self.p2 = p2
-        self.choices = {}
-
-    async def handle_choice(self, interaction: discord.Interaction, choice: str):
-        if self.p2:
-            if interaction.user not in [self.p1, self.p2]:
-                return await interaction.response.send_message("Not your game!", ephemeral=True)
-            self.choices[interaction.user.id] = choice
-            if len(self.choices) == 2:
-                c1 = self.choices[self.p1.id]
-                c2 = self.choices[self.p2.id]
-                res = "Draw!" if c1 == c2 else f"{self.p1.mention} wins!" if (c1=="Rock" and c2=="Scissors") or (c1=="Paper" and c2=="Rock") or (c1=="Scissors" and c2=="Paper") else f"{self.p2.mention} wins!"
-                for child in self.children: child.disabled = True
-                await interaction.response.edit_message(content=f"{self.p1.mention} chose {c1}, {self.p2.mention} chose {c2}. {res}", view=self)
-            else:
-                await interaction.response.send_message("Choice locked.", ephemeral=True)
-        else:
-            if interaction.user != self.p1:
-                return await interaction.response.send_message("Not your game!", ephemeral=True)
-            bot_choice = random.choice(["Rock", "Paper", "Scissors"])
-            res = "Draw!" if choice == bot_choice else "You win!" if (choice=="Rock" and bot_choice=="Scissors") or (choice=="Paper" and bot_choice=="Rock") or (choice=="Scissors" and bot_choice=="Paper") else "I win!"
-            for child in self.children: child.disabled = True
-            await interaction.response.edit_message(content=f"You chose {choice}, I chose {bot_choice}. {res}", view=self)
-
-    @discord.ui.button(label="Rock", emoji="🪨")
-    async def rock(self, interaction: discord.Interaction, button: discord.ui.Button): await self.handle_choice(interaction, "Rock")
-    @discord.ui.button(label="Paper", emoji="📄")
-    async def paper(self, interaction: discord.Interaction, button: discord.ui.Button): await self.handle_choice(interaction, "Paper")
-    @discord.ui.button(label="Scissors", emoji="✂️")
-    async def scissors(self, interaction: discord.Interaction, button: discord.ui.Button): await self.handle_choice(interaction, "Scissors")
-
-class TicTacToeButton(discord.ui.Button):
-    def __init__(self, x, y):
-        super().__init__(style=discord.ButtonStyle.secondary, label="\u200b", row=y)
-        self.x = x
-        self.y = y
-    async def callback(self, interaction: discord.Interaction):
-        view: TicTacToeView = self.view
-        if interaction.user not in [view.p1, view.p2]:
-            return await interaction.response.send_message("Not your game!", ephemeral=True)
-        if interaction.user == view.p1 and view.current_player == view.p2:
-            return await interaction.response.send_message("Not your turn!", ephemeral=True)
-        if interaction.user == view.p2 and view.current_player == view.p1:
-            return await interaction.response.send_message("Not your turn!", ephemeral=True)
-        self.style = discord.ButtonStyle.success if view.current_player == view.p1 else discord.ButtonStyle.danger
-        self.label = "X" if view.current_player == view.p1 else "O"
-        self.disabled = True
-        view.board[self.y][self.x] = view.current_player
-        winner = view.check_winner()
-        if winner:
-            for child in view.children: child.disabled = True
-            content = f"{winner.mention} won!"
-        elif all(view.board[y][x] for x in range(3) for y in range(3)):
-            content = "It's a tie!"
-        else:
-            view.current_player = view.p2 if view.current_player == view.p1 else view.p1
-            content = f"Tic-Tac-Toe: {view.current_player.mention}'s turn"
-        await interaction.response.edit_message(content=content, view=view)
-
-class TicTacToeView(discord.ui.View):
-    def __init__(self, p1, p2):
-        super().__init__(timeout=60)
-        self.p1 = p1
-        self.p2 = p2
-        self.current_player = p1
-        self.board = [[None, None, None] for _ in range(3)]
-        for y in range(3):
-            for x in range(3):
-                self.add_item(TicTacToeButton(x, y))
-    def check_winner(self):
-        for i in range(3):
-            if self.board[i][0] == self.board[i][1] == self.board[i][2] != None: return self.board[i][0]
-            if self.board[0][i] == self.board[1][i] == self.board[2][i] != None: return self.board[0][i]
-        if self.board[0][0] == self.board[1][1] == self.board[2][2] != None: return self.board[0][0]
-        if self.board[0][2] == self.board[1][1] == self.board[2][0] != None: return self.board[0][2]
-        return None
-
-class StackingView(discord.ui.View):
-    def __init__(self, players):
-        super().__init__(timeout=60)
-        self.players = players
-        self.stack = 0
-        self.last_player = None
-    @discord.ui.button(label="Stack +1", style=discord.ButtonStyle.primary)
-    async def stack_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if interaction.user not in self.players:
-            return await interaction.response.send_message("Not your game!", ephemeral=True)
-        if interaction.user == self.last_player:
-            for child in self.children: child.disabled = True
-            return await interaction.response.edit_message(content=f"{interaction.user.mention} stacked twice in a row and dropped it! Final score: {self.stack}", view=self)
-        if random.random() < 0.1:
-            for child in self.children: child.disabled = True
-            return await interaction.response.edit_message(content=f"{interaction.user.mention} tried to stack but it collapsed! Final score: {self.stack}", view=self)
-        self.stack += 1
-        self.last_player = interaction.user
-        await interaction.response.edit_message(content=f"Current Stack: {self.stack}\nLast stacked by {interaction.user.mention}", view=self)
-
-class GameSelectView(discord.ui.View):
-    def __init__(self, players):
-        super().__init__(timeout=60)
-        self.players = players
-
-    @discord.ui.select(options=[
-        discord.SelectOption(label="Rock Paper Scissors", value="rps"),
-        discord.SelectOption(label="Tic-Tac-Toe", value="ttt"),
-        discord.SelectOption(label="Stacking", value="stack"),
-        discord.SelectOption(label="Coin Flip", value="coin"),
-        discord.SelectOption(label="Dice Roll", value="dice"),
-        discord.SelectOption(label="8-Ball", value="8ball"),
-        discord.SelectOption(label="Guess the Number", value="guess"),
-        discord.SelectOption(label="Russian Roulette", value="roulette"),
-        discord.SelectOption(label="High or Low", value="highlow"),
-        discord.SelectOption(label="Reaction Test", value="react"),
-        discord.SelectOption(label="Math Quiz", value="math"),
-        discord.SelectOption(label="Slots", value="slots"),
-        discord.SelectOption(label="Word Scramble", value="scramble"),
-        discord.SelectOption(label="Trivia", value="trivia"),
-        discord.SelectOption(label="Hangman", value="hangman")
-    ])
-    async def select_game(self, interaction: discord.Interaction, select: discord.ui.Select):
-        if interaction.user != self.players[0]:
-            return await interaction.response.send_message("Only the host can pick!", ephemeral=True)
-        v = select.values[0]
-        if v == "rps":
-            await interaction.response.send_message(content="Rock Paper Scissors!", view=RPSView(self.players[0], self.players[1] if len(self.players)>1 else None))
-        elif v == "ttt":
-            if len(self.players) < 2: return await interaction.response.send_message("Tic-Tac-Toe needs 2 players!", ephemeral=True)
-            await interaction.response.send_message(content=f"Tic-Tac-Toe: {self.players[0].mention}'s turn", view=TicTacToeView(self.players[0], self.players[1]))
-        elif v == "stack":
-            await interaction.response.send_message(content="Stacking Game! Don't let it fall!", view=StackingView(self.players))
-        elif v == "coin":
-            await interaction.response.send_message(content=f"{interaction.user.mention} flipped a coin and got: **{random.choice(['Heads', 'Tails'])}**")
-        elif v == "dice":
-            res = [str(random.randint(1, 6)) for _ in self.players]
-            await interaction.response.send_message(content="Rolls: " + ", ".join([f"{p.mention}: {r}" for p, r in zip(self.players, res)]))
-        elif v == "8ball":
-            ans = ["Yes", "No", "Maybe", "Definitely", "Ask again later", "I don't think so"]
-            await interaction.response.send_message(content=f"🎱 {random.choice(ans)}")
-        elif v == "guess":
-            num = random.randint(1, 100)
-            await interaction.response.send_message(content="I picked a number between 1 and 100. (Backend generated, type to chat!)")
-        elif v == "roulette":
-            if random.randint(1, 6) == 1: await interaction.response.send_message(content=f"💥 {interaction.user.mention} died!")
-            else: await interaction.response.send_message(content=f"💨 {interaction.user.mention} survived.")
-        elif v == "highlow":
-            await interaction.response.send_message(content=f"Card drawn: {random.randint(1, 13)}. Is the next one higher or lower?")
-        elif v == "react":
-            await interaction.response.send_message(content="Wait for it... Click not implemented in compact mode. BOOM!")
-        elif v == "math":
-            a, b = random.randint(1, 50), random.randint(1, 50)
-            await interaction.response.send_message(content=f"What is {a} + {b}?")
-        elif v == "slots":
-            sym = ["🍒", "🍋", "🔔", "⭐", "💎"]
-            r = [random.choice(sym) for _ in range(3)]
-            await interaction.response.send_message(content=f"[{r[0]} | {r[1]} | {r[2]}]\n{'You win!' if r[0]==r[1]==r[2] else 'You lose.'}")
-        elif v == "scramble":
-            word = "herald"
-            await interaction.response.send_message(content="Unscramble: ldaher")
-        elif v == "trivia":
-            await interaction.response.send_message(content="What is the capital of Kuwait? (Answer in chat)")
-        elif v == "hangman":
-            await interaction.response.send_message(content="Guess the word: _ _ _ _ _ _")
-
-@bot.tree.command(name="gamehub", description="Open Herald's interactive Game Hub supporting up to 8 players.")
-@app_commands.describe(
-    p2="Player 2", p3="Player 3", p4="Player 4", p5="Player 5",
-    p6="Player 6", p7="Player 7", p8="Player 8"
-)
-async def gamehub(interaction: discord.Interaction, p2: discord.Member = None, p3: discord.Member = None, p4: discord.Member = None, p5: discord.Member = None, p6: discord.Member = None, p7: discord.Member = None, p8: discord.Member = None):
-    players = [interaction.user]
-    for p in [p2, p3, p4, p5, p6, p7, p8]:
-        if p and p not in players and not p.bot: players.append(p)
-    await interaction.response.send_message(content=f"Game Hub Host: {interaction.user.mention}. Players: {len(players)}/8. Select a game!", view=GameSelectView(players))
 
 @bot.event
 async def on_message(message):
@@ -560,15 +384,18 @@ async def on_message(message):
         history.append({"role": "user", "content": message.content})
         
         try:
-            reply_text = await generate_groq_response(formatted_history)
+            reply_text = await generate_ai_response(formatted_history)
             if limit_reached:
                 reply_text += "\n\n*(Note: Memory limit reached. Oldest messages removed to clear up brain space!)*"
             
             history.append({"role": "assistant", "content": reply_text})
             await save_memory(user_id, history)
-            await message.reply(reply_text)
+            
+            for i in range(0, len(reply_text), 1999):
+                await message.reply(reply_text[i:i+1999])
+                
         except Exception:
-            await message.reply("my brain broke, try again in a minute plz")
+            await message.reply("my brain broke, plz try in a minute")
 
 if DISCORD_BOT_TOKEN:
     keep_alive()
