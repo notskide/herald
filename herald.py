@@ -171,7 +171,7 @@ async def generate_groq_response(messages):
             sanitized_messages.append({"role": role, "content": content})
 
     payload = {
-        "model": "openai/gpt-oss-120b",
+        "model": "llama-3.1-8b-instant",
         "messages": sanitized_messages
     }
     
