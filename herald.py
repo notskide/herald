@@ -146,11 +146,10 @@ async def ping(interaction: discord.Interaction):
 
 @bot.tree.command(name="updatelogs", description="View Herald's latest update logs and patch notes.")
 async def updatelogs(interaction: discord.Interaction):
-    embed = discord.Embed(title="Herald Patch Notes - Version 1.75.1", color=discord.Color.blue())
-    embed.add_field(name="🛡️ Model Fallback System (V 1.75.1)", value="• Added automatic model switching! If the main high-IQ model goes down or rate limits, Herald seamlessly switches to a backup brain.", inline=False)
-    embed.add_field(name="🚀 Core System Upgrade (V 1.7)", value="• Swapped internal cognitive engine to Groq for drastically faster response times and stable uptime.", inline=False)
-    embed.add_field(name="💬 Selective Chat Listener (V 1.65)", value="• Herald now only responds when directly pinged, replied to, or mentioned by name.", inline=False)
-    embed.add_field(name="🎮 Game Hub (V 1.5)", value="• Added `/gamehub` supporting up to 8 players with 15 mini-games.", inline=False)
+    embed = discord.Embed(title="Herald Patch Notes - Version 1.7", color=discord.Color.blue())
+    embed.add_field(name="🚀 Core System Upgrade (V 1.7)", value="• Swapped internal cognitive engine to Groq for drastically faster response times and stable uptime.\n• System optimization specifically targeted at solving API expiration limits.", inline=False)
+    embed.add_field(name="💬 Selective Chat Listener (V 1.65)", value="• Herald now only responds when directly pinged, replied to, or mentioned by name.\n• Fixed cross-reply triggers so Herald won't interfere in other users' conversations.", inline=False)
+    embed.add_field(name="🎮 Game Hub (V 1.5)", value="• Added `/gamehub` supporting up to 8 players.\n• Features 15 mini-games including RPS, Tic-Tac-Toe, Stacking, Slots, Trivia, and Math!", inline=False)
     await interaction.response.send_message(embed=embed)
 
 async def generate_groq_response(messages):
@@ -171,35 +170,24 @@ async def generate_groq_response(messages):
         if content:
             sanitized_messages.append({"role": role, "content": content})
 
-    # Array of models to attempt. High IQ first, lightweight second, alternative third.
-    models_to_try = [
-        "llama-3.3-70b-versatile",
-        "llama3-8b-8192",
-        "mixtral-8x7b-32768"
-    ]
+    payload = {
+        "model": "openai/gpt-oss-120b",
+        "messages": sanitized_messages
+    }
     
     async with aiohttp.ClientSession() as session:
-        for model_name in models_to_try:
-            payload = {
-                "model": model_name,
-                "messages": sanitized_messages
-            }
-            try:
-                async with session.post(url, headers=headers, json=payload) as response:
-                    if response.status == 200:
-                        data = await response.json()
-                        return data["choices"][0]["message"]["content"]
-                    else:
-                        err_body = await response.text()
-                        print(f"GROQ HTTP ERROR {response.status} with {model_name}: {err_body}")
-                        # Continue to the next model in the list on failure (404, 429, etc)
-                        continue
-            except Exception as e:
-                print(f"GROQ REQUEST EXCEPTION for {model_name}: {e}")
-                continue
-                
-        # If all models in the list fail
-        return "my brain is tied up right now, give me a sec..."
+        try:
+            async with session.post(url, headers=headers, json=payload) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    return data["choices"][0]["message"]["content"]
+                else:
+                    err_body = await response.text()
+                    print(f"GROQ HTTP ERROR {response.status}: {err_body}")
+                    return "my brain is tied up right now, give me a sec..."
+        except Exception as e:
+            print(f"GROQ REQUEST EXCEPTION: {e}")
+            return "my brain is not braining. try again in a couple of hours."
 
 @bot.tree.command(name="feedback", description="Submit feedback or report a bug directly to Skide.")
 @app_commands.describe(feedback="Your feedback or bug report for Skide")
@@ -580,7 +568,7 @@ async def on_message(message):
             await save_memory(user_id, history)
             await message.reply(reply_text)
         except Exception:
-            await message.reply("my brain broke, plz try in a minute")
+            await message.reply("my brain broke, try again in a minute plz")
 
 if DISCORD_BOT_TOKEN:
     keep_alive()
