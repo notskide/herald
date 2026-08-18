@@ -154,16 +154,25 @@ async def updatelogs(interaction: discord.Interaction):
 
 async def generate_groq_response(messages):
     if not GROQ_API_KEY:
+        print("ERROR: GROQ_API_KEY environment variable is missing.")
         return "my engine is missing its key..."
         
     url = "https://api.groq.com/openai/v1/chat/completions"
     headers = {
-        "Authorization": f"Bearer {GROQ_API_KEY}",
+        "Authorization": f"Bearer {GROQ_API_KEY.strip()}",
         "Content-Type": "application/json"
     }
+    
+    sanitized_messages = []
+    for msg in messages:
+        role = msg.get("role", "user")
+        content = str(msg.get("content", "")).strip()
+        if content:
+            sanitized_messages.append({"role": role, "content": content})
+
     payload = {
         "model": "llama-3.1-8b-instant",
-        "messages": messages
+        "messages": sanitized_messages
     }
     
     async with aiohttp.ClientSession() as session:
@@ -173,8 +182,11 @@ async def generate_groq_response(messages):
                     data = await response.json()
                     return data["choices"][0]["message"]["content"]
                 else:
+                    err_body = await response.text()
+                    print(f"GROQ HTTP ERROR {response.status}: {err_body}")
                     return "my brain is tied up right now, give me a sec..."
-        except Exception:
+        except Exception as e:
+            print(f"GROQ REQUEST EXCEPTION: {e}")
             return "my brain is not braining. try again in a couple of hours."
 
 @bot.tree.command(name="feedback", description="Submit feedback or report a bug directly to Skide.")
@@ -535,12 +547,14 @@ async def on_message(message):
             if role == "model":
                 role = "assistant"
             
-            if "parts" in h:
-                content = h["parts"][0]["text"]
+            content = ""
+            if "parts" in h and isinstance(h["parts"], list) and len(h["parts"]) > 0:
+                content = h["parts"][0].get("text", "")
             else:
-                content = h.get("content", "")
+                content = str(h.get("content", ""))
                 
-            formatted_history.append({"role": role, "content": content})
+            if content.strip():
+                formatted_history.append({"role": role, "content": content.strip()})
             
         formatted_history.append({"role": "user", "content": message.content})
         history.append({"role": "user", "content": message.content})
@@ -554,7 +568,7 @@ async def on_message(message):
             await save_memory(user_id, history)
             await message.reply(reply_text)
         except Exception:
-            await message.reply("my brain is not braining. try again in a couple of hours.")
+            await message.reply("i'm sorry, i got an http 404 error while processing your request.")
 
 if DISCORD_BOT_TOKEN:
     keep_alive()
