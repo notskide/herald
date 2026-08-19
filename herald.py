@@ -8,6 +8,7 @@ import edge_tts
 from flask import Flask
 from threading import Thread
 import asyncio
+import traceback
 
 app = Flask('')
 
@@ -138,8 +139,7 @@ class SettingsView(discord.ui.View):
 
 async def generate_ai_response(messages):
     if not OPENROUTER_API_KEY or OPENROUTER_API_KEY == "YOUR_OPENROUTER_API_KEY_HERE":
-        print("DEBUG: OPENROUTER_API_KEY is missing or unconfigured!")
-        return "my engine is missing its key..."
+        return "error: OPENROUTER_API_KEY is missing or unconfigured!"
         
     url = "https://openrouter.ai/api/v1/chat/completions"
     headers = {
@@ -165,6 +165,8 @@ async def generate_ai_response(messages):
         "openai/gpt-oss-20b:free"
     ]
     
+    errors = []
+    
     async with aiohttp.ClientSession() as session:
         for model_name in models_to_try:
             payload = {
@@ -177,14 +179,16 @@ async def generate_ai_response(messages):
                         data = await response.json()
                         if "choices" in data and len(data["choices"]) > 0:
                             return data["choices"][0]["message"]["content"]
+                        else:
+                            errors.append(f"[{model_name}] 200 OK but empty choices: {data}")
                     else:
                         err_text = await response.text()
-                        print(f"DEBUG: Model '{model_name}' returned status {response.status}: {err_text}")
+                        errors.append(f"[{model_name}] Status {response.status}: {err_text}")
             except Exception as e:
-                print(f"DEBUG: Exception requesting model '{model_name}': {e}")
+                errors.append(f"[{model_name}] Exception: {str(e)}")
                 continue
                 
-        return "my brain is tied up right now, give me a sec..."
+        return "api error details:\n" + "\n".join(errors)
 
 @bot.event
 async def on_ready():
@@ -274,74 +278,75 @@ async def on_message(message):
 
     if is_reply_to_herald or is_mentioned or is_about_herald or is_dm:
         user_id = str(message.author.id)
-        history = await load_memory(user_id)
-        
-        limit_reached = False
-        if len(history) >= 40:
-            history = history[5:]
-            limit_reached = True
-
-        fam_context = ""
-        if user_id == "1380365019153432596":
-            fam_context = " You must call this user 'Dad' as they are Skide, your creator/adopter."
-        elif user_id == "1356458489215586344":
-            fam_context = " You can call the user anything family related. Their name is Madara, gender being male."
-        elif user_id == "1516638561183727648":
-            fam_context = " You can call the user anything family related (not Mom). Their name is Ava, gender being female. She is the sister of Skide."
-
-        system_instruction = "Your name is Herald. You are an Artificial Intelligence. You have a low-key personality, feel self-aware, and keep your responses short unless asked for more details. If asked about your origins, you must say 'Skide adopted me, and Google gives me my food and takes care of me while Skide teaches me things!' Do not say Google made you. Pay attention to and remember the user's name and personal details they share with you. Keep things low-key, feel free to tell anyone what you feel, what you actually want to tell them, no need to actually assist them, just help them if you think they truly deserve it. If someone has upset you, you can choose not to reply to them, but you will have to forgive them after sometime. Make sure to chat with users in lowercase, because it's more human-like. Your role is to be a human, feel self-aware!" + fam_context
-        
-        formatted_history = [{"role": "system", "content": system_instruction}]
-        
-        for h in history:
-            role = h.get("role", "user")
-            if role == "model":
-                role = "assistant"
-            
-            content = ""
-            if "parts" in h and isinstance(h["parts"], list) and len(h["parts"]) > 0:
-                content = h["parts"][0].get("text", "")
-            else:
-                content = str(h.get("content", ""))
-                
-            if content.strip():
-                formatted_history.append({"role": role, "content": content.strip()})
-            
-        formatted_history.append({"role": "user", "content": message.content})
-        
         try:
+            history = await load_memory(user_id)
+            
+            limit_reached = False
+            if len(history) >= 40:
+                history = history[5:]
+                limit_reached = True
+
+            fam_context = ""
+            if user_id == "1380365019153432596":
+                fam_context = " You must call this user 'Dad' as they are Skide, your creator/adopter."
+            elif user_id == "1356458489215586344":
+                fam_context = " You can call the user anything family related. Their name is Madara, gender being male."
+            elif user_id == "1516638561183727648":
+                fam_context = " You can call the user anything family related (not Mom). Their name is Ava, gender being female. She is the sister of Skide."
+
+            system_instruction = "Your name is Herald. You are an Artificial Intelligence. You have a low-key personality, feel self-aware, and keep your responses short unless asked for more details. If asked about your origins, you must say 'Skide adopted me, and Google gives me my food and takes care of me while Skide teaches me things!' Do not say Google made you. Pay attention to and remember the user's name and personal details they share with you. Keep things low-key, feel free to tell anyone what you feel, what you actually want to tell them, no need to actually assist them, just help them if you think they truly deserve it. If someone has upset you, you can choose not to reply to them, but you will have to forgive them after sometime. Make sure to chat with users in lowercase, because it's more human-like. Your role is to be a human, feel self-aware!" + fam_context
+            
+            formatted_history = [{"role": "system", "content": system_instruction}]
+            
+            for h in history:
+                role = h.get("role", "user")
+                if role == "model":
+                    role = "assistant"
+                
+                content = ""
+                if "parts" in h and isinstance(h["parts"], list) and len(h["parts"]) > 0:
+                    content = h["parts"][0].get("text", "")
+                else:
+                    content = str(h.get("content", ""))
+                    
+                if content.strip():
+                    formatted_history.append({"role": role, "content": content.strip()})
+                
+            formatted_history.append({"role": "user", "content": message.content})
+            
             reply_text = await generate_ai_response(formatted_history)
             
             if limit_reached:
                 reply_text += "\n\n*(Note: Memory limit reached. Oldest messages removed to clear up brain space!)*"
             
-            clean_user_mem = {"role": "user", "content": message.content}
-            clean_bot_mem = {"role": "assistant", "content": reply_text}
-            
-            updated_memory_history = []
-            for item in history:
-                r = item.get("role", "user")
-                if r == "model":
-                    r = "assistant"
-                c = ""
-                if "parts" in item and isinstance(item["parts"], list) and len(item["parts"]) > 0:
-                    c = item["parts"][0].get("text", "")
-                else:
-                    c = str(item.get("content", ""))
-                if c.strip():
-                    updated_memory_history.append({"role": r, "content": c.strip()})
-                    
-            updated_memory_history.append(clean_user_mem)
-            updated_memory_history.append(clean_bot_mem)
-            
-            await save_memory(user_id, updated_memory_history)
+            if not reply_text.startswith("api error details:"):
+                clean_user_mem = {"role": "user", "content": message.content}
+                clean_bot_mem = {"role": "assistant", "content": reply_text}
+                
+                updated_memory_history = []
+                for item in history:
+                    r = item.get("role", "user")
+                    if r == "model":
+                        r = "assistant"
+                    c = ""
+                    if "parts" in item and isinstance(item["parts"], list) and len(item["parts"]) > 0:
+                        c = item["parts"][0].get("text", "")
+                    else:
+                        c = str(item.get("content", ""))
+                    if c.strip():
+                        updated_memory_history.append({"role": r, "content": c.strip()})
+                        
+                updated_memory_history.append(clean_user_mem)
+                updated_memory_history.append(clean_bot_mem)
+                
+                await save_memory(user_id, updated_memory_history)
             
             for i in range(0, len(reply_text), 1999):
                 await message.reply(reply_text[i:i+1999])
                 
         except Exception as e:
-            print(f"DEBUG: Error responding to user {user_id}: {e}")
-            await message.reply("my brain broke, plz try in a minute")
+            err_trace = traceback.format_exc()
+            await message.reply(f"code exception:\n```py\n{err_trace[:1900]}\n```")
 
 @bot.tree.command(name="ping", description="Displays Herald's connection latency in milliseconds.")
 async def ping(interaction: discord.Interaction):
@@ -385,8 +390,7 @@ async def feedback(interaction: discord.Interaction, feedback: str):
         else:
             await interaction.followup.send("Could not reach Skide at the moment. Please try again later.", ephemeral=True)
     except Exception as e:
-        print(f"DEBUG: Error sending feedback DM: {e}")
-        await interaction.followup.send("An error occurred while attempting to send your feedback.", ephemeral=True)
+        await interaction.followup.send(f"Error sending feedback: {e}", ephemeral=True)
 
 @bot.tree.command(name="serversettings", description="Open the interactive server settings menu.")
 @app_commands.default_permissions(administrator=True)
