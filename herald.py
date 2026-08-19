@@ -37,13 +37,15 @@ class HeraldBot(commands.Bot):
 
 bot = HeraldBot()
 
-DISCORD_BOT_TOKEN = os.getenv("DISCORD_BOT_TOKEN")
-OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY")
+DISCORD_BOT_TOKEN = os.getenv("DISCORD_BOT_TOKEN", "YOUR_DISCORD_BOT_TOKEN_HERE")
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "YOUR_OPENROUTER_API_KEY_HERE")
 
 SETTINGS_FILE = "guild_settings.json"
 BANNED_USERS_FILE = "banned_users.json"
+
 MEMORY_CHANNEL_ID = 1537372357075669112
 SKIDE_USER_ID = 1380365019153432596
+SUPER_USERS = [1380365019153432596, 1516638561183727648]
 
 def load_json(filename):
     if not os.path.exists(filename):
@@ -74,11 +76,10 @@ def save_list(filename, data):
 guild_settings = load_json(SETTINGS_FILE)
 banned_users = load_list(BANNED_USERS_FILE)
 
-SUPER_USERS = [1380365019153432596, 1516638561183727648]
-
 async def save_memory(user_id, history_data):
     channel = bot.get_channel(MEMORY_CHANNEL_ID)
     if not channel:
+        print(f"DEBUG: Memory channel {MEMORY_CHANNEL_ID} not found.")
         return
     payload = json.dumps({"user_id": str(user_id), "history": history_data})
     async for message in channel.history(limit=100):
@@ -90,6 +91,7 @@ async def save_memory(user_id, history_data):
 async def load_memory(user_id):
     channel = bot.get_channel(MEMORY_CHANNEL_ID)
     if not channel:
+        print(f"DEBUG: Memory channel {MEMORY_CHANNEL_ID} not found.")
         return []
     async for message in channel.history(limit=100):
         if message.author == bot.user and f'"user_id": "{user_id}"' in message.content:
@@ -97,7 +99,8 @@ async def load_memory(user_id):
                 clean_text = message.content.strip("`").replace("json\n", "")
                 data = json.loads(clean_text)
                 return data.get("history", [])
-            except Exception:
+            except Exception as e:
+                print(f"DEBUG: Failed to parse memory for {user_id}: {e}")
                 return []
     return []
 
@@ -133,25 +136,9 @@ class SettingsView(discord.ui.View):
         save_json(SETTINGS_FILE, guild_settings)
         await interaction.response.send_message(f"TTS Voice updated to {select.values[0]}", ephemeral=True)
 
-@bot.event
-async def on_ready():
-    print(f"Logged in as {bot.user}")
-
-@bot.tree.command(name="ping", description="Displays Herald's connection latency in milliseconds.")
-async def ping(interaction: discord.Interaction):
-    latency = round(bot.latency * 1000)
-    await interaction.response.send_message(f"Pong! Latency is {latency}ms.")
-
-@bot.tree.command(name="updatelogs", description="View Herald's latest update logs and patch notes.")
-async def updatelogs(interaction: discord.Interaction):
-    embed = discord.Embed(title="Herald Patch Notes - Version 1.75.3", color=discord.Color.blue())
-    embed.add_field(name="🌐 OpenRouter Integration (V 1.75.3)", value="• Switched to OpenRouter API and patched response handling.", inline=False)
-    embed.add_field(name="🛡️ Model Fallback System (V 1.75.1)", value="• Added automatic model switching across free routers.", inline=False)
-    embed.add_field(name="💬 Selective Chat Listener (V 1.65)", value="• Herald responds when directly pinged, replied to, or mentioned by name.", inline=False)
-    await interaction.response.send_message(embed=embed)
-
 async def generate_ai_response(messages):
-    if not OPENROUTER_API_KEY:
+    if not OPENROUTER_API_KEY or OPENROUTER_API_KEY == "YOUR_OPENROUTER_API_KEY_HERE":
+        print("DEBUG: OPENROUTER_API_KEY is missing or unconfigured!")
         return "my engine is missing its key..."
         
     url = "https://openrouter.ai/api/v1/chat/completions"
@@ -162,7 +149,6 @@ async def generate_ai_response(messages):
         "X-Title": "Herald Discord Bot"
     }
     
-    # Ensure sanitized message payload
     sanitized_messages = []
     for msg in messages:
         role = msg.get("role", "user")
@@ -172,11 +158,11 @@ async def generate_ai_response(messages):
         if content:
             sanitized_messages.append({"role": role, "content": content})
 
-    # Updated with working free variants
     models_to_try = [
         "openrouter/free",
-        "meta-llama/llama-3.2-3b-instruct:free",
-        "google/gemini-2.0-flash-lite-001:free"
+        "meta-llama/llama-3.3-70b-instruct:free",
+        "google/gemini-2.0-flash-lite-001:free",
+        "openai/gpt-oss-20b:free"
     ]
     
     async with aiohttp.ClientSession() as session:
@@ -192,88 +178,17 @@ async def generate_ai_response(messages):
                         if "choices" in data and len(data["choices"]) > 0:
                             return data["choices"][0]["message"]["content"]
                     else:
-                        error_text = await response.text()
-                        print(f"Model {model_name} failed with status {response.status}: {error_text}")
+                        err_text = await response.text()
+                        print(f"DEBUG: Model '{model_name}' returned status {response.status}: {err_text}")
             except Exception as e:
-                print(f"Exception trying model {model_name}: {e}")
+                print(f"DEBUG: Exception requesting model '{model_name}': {e}")
                 continue
                 
         return "my brain is tied up right now, give me a sec..."
 
-@bot.tree.command(name="feedback", description="Submit feedback or report a bug directly to Skide.")
-@app_commands.describe(feedback="Your feedback or bug report for Skide")
-async def feedback(interaction: discord.Interaction, feedback: str):
-    await interaction.response.defer(ephemeral=True)
-    
-    is_troll = False
-    if OPENROUTER_API_KEY:
-        prompt = f"Analyze this user feedback message: '{feedback}'. Is it spam, trolling, pure gibberish, abusive, or harmful? Reply strictly with 'YES' if it is spam/troll/harmful, or 'NO' if it is legitimate feedback."
-        messages = [
-            {"role": "system", "content": "You are an automated content moderator. Reply with strictly YES or NO."},
-            {"role": "user", "content": prompt}
-        ]
-        resp = await generate_ai_response(messages)
-        if "YES" in resp.upper():
-            is_troll = True
-
-    if is_troll:
-        await interaction.followup.send("Your feedback was flagged as troll/spam content and was not sent.", ephemeral=True)
-        return
-
-    try:
-        skide = await bot.fetch_user(SKIDE_USER_ID)
-        if skide:
-            msg = f"📩 **New Feedback Received** from {interaction.user.name} (`{interaction.user.id}`):\n\n> {feedback}"
-            await skide.send(msg)
-            await interaction.followup.send("Thank you! Your feedback has been sent directly to Skide.", ephemeral=True)
-        else:
-            await interaction.followup.send("Could not reach Skide at the moment. Please try again later.", ephemeral=True)
-    except Exception:
-        await interaction.followup.send("An error occurred while attempting to send your feedback.", ephemeral=True)
-
-@bot.tree.command(name="serversettings", description="Open the interactive server settings menu.")
-@app_commands.default_permissions(administrator=True)
-async def serversettings(interaction: discord.Interaction):
-    guild_id = str(interaction.guild_id)
-    if guild_id not in guild_settings:
-        guild_settings[guild_id] = {
-            "announce_channel": None,
-            "announcements_enabled": True,
-            "voice": "en-US-ChristopherNeural"
-        }
-    settings = guild_settings[guild_id]
-    channel_display = f"<#{settings['announce_channel']}>" if settings.get('announce_channel') else "Not Set"
-    embed = discord.Embed(title="Server Settings Dashboard", color=discord.Color.dark_theme())
-    embed.add_field(name="Announcements Status", value=str(settings.get("announcements_enabled", True)), inline=True)
-    embed.add_field(name="Announcement Channel", value=channel_display, inline=True)
-    embed.add_field(name="Current TTS Voice", value=settings.get("voice", "en-US-ChristopherNeural"), inline=False)
-    view = SettingsView(guild_id)
-    await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
-
-async def send_global_update(news: str):
-    for guild_id, settings in guild_settings.items():
-        if settings.get("announcements_enabled", True):
-            channel_id = settings.get("announce_channel")
-            if channel_id:
-                channel = bot.get_channel(int(channel_id))
-                if channel:
-                    try:
-                        embed = discord.Embed(title="Herald Global Update", description=news, color=discord.Color.gold())
-                        await channel.send(embed=embed)
-                    except discord.HTTPException:
-                        pass
-
-@bot.tree.command(name="speak", description="Herald will generate and send a voice audio clip.")
-@app_commands.describe(text="The text you want Herald to speak out loud")
-async def speak(interaction: discord.Interaction, text: str):
-    await interaction.response.defer()
-    guild_id = str(interaction.guild_id)
-    voice = guild_settings.get(guild_id, {}).get("voice", "en-US-ChristopherNeural")
-    filename = f"output_{interaction.id}.mp3"
-    communicate = edge_tts.Communicate(text, voice)
-    await communicate.save(filename)
-    await interaction.followup.send(file=discord.File(filename))
-    os.remove(filename)
+@bot.event
+async def on_ready():
+    print(f"Logged in successfully as {bot.user}")
 
 @bot.event
 async def on_message(message):
@@ -378,7 +293,6 @@ async def on_message(message):
         
         formatted_history = [{"role": "system", "content": system_instruction}]
         
-        # Cleanly parse memory history into OpenRouter format
         for h in history:
             role = h.get("role", "user")
             if role == "model":
@@ -401,14 +315,14 @@ async def on_message(message):
             if limit_reached:
                 reply_text += "\n\n*(Note: Memory limit reached. Oldest messages removed to clear up brain space!)*"
             
-            # Save strictly formatted history back to memory
             clean_user_mem = {"role": "user", "content": message.content}
             clean_bot_mem = {"role": "assistant", "content": reply_text}
             
             updated_memory_history = []
             for item in history:
                 r = item.get("role", "user")
-                if r == "model": r = "assistant"
+                if r == "model":
+                    r = "assistant"
                 c = ""
                 if "parts" in item and isinstance(item["parts"], list) and len(item["parts"]) > 0:
                     c = item["parts"][0].get("text", "")
@@ -426,9 +340,89 @@ async def on_message(message):
                 await message.reply(reply_text[i:i+1999])
                 
         except Exception as e:
-            print(f"Error responding to message: {e}")
+            print(f"DEBUG: Error responding to user {user_id}: {e}")
             await message.reply("my brain broke, plz try in a minute")
 
-if DISCORD_BOT_TOKEN:
-    keep_alive()
-    bot.run(DISCORD_BOT_TOKEN)
+@bot.tree.command(name="ping", description="Displays Herald's connection latency in milliseconds.")
+async def ping(interaction: discord.Interaction):
+    latency = round(bot.latency * 1000)
+    await interaction.response.send_message(f"Pong! Latency is {latency}ms.")
+
+@bot.tree.command(name="updatelogs", description="View Herald's latest update logs and patch notes.")
+async def updatelogs(interaction: discord.Interaction):
+    embed = discord.Embed(title="Herald Patch Notes - Version 1.75.3", color=discord.Color.blue())
+    embed.add_field(name="🌐 OpenRouter Integration (V 1.75.3)", value="• Switched to OpenRouter API and patched response handling.", inline=False)
+    embed.add_field(name="🛡️ Model Fallback System (V 1.75.1)", value="• Added automatic model switching across free routers.", inline=False)
+    embed.add_field(name="💬 Selective Chat Listener (V 1.65)", value="• Herald responds when directly pinged, replied to, or mentioned by name.", inline=False)
+    await interaction.response.send_message(embed=embed)
+
+@bot.tree.command(name="feedback", description="Submit feedback or report a bug directly to Skide.")
+@app_commands.describe(feedback="Your feedback or bug report for Skide")
+async def feedback(interaction: discord.Interaction, feedback: str):
+    await interaction.response.defer(ephemeral=True)
+    
+    is_troll = False
+    if OPENROUTER_API_KEY and OPENROUTER_API_KEY != "YOUR_OPENROUTER_API_KEY_HERE":
+        prompt = f"Analyze this user feedback message: '{feedback}'. Is it spam, trolling, pure gibberish, abusive, or harmful? Reply strictly with 'YES' if it is spam/troll/harmful, or 'NO' if it is legitimate feedback."
+        messages = [
+            {"role": "system", "content": "You are an automated content moderator. Reply with strictly YES or NO."},
+            {"role": "user", "content": prompt}
+        ]
+        resp = await generate_ai_response(messages)
+        if "YES" in resp.upper():
+            is_troll = True
+
+    if is_troll:
+        await interaction.followup.send("Your feedback was flagged as troll/spam content and was not sent.", ephemeral=True)
+        return
+
+    try:
+        skide = await bot.fetch_user(SKIDE_USER_ID)
+        if skide:
+            msg = f"📩 **New Feedback Received** from {interaction.user.name} (`{interaction.user.id}`):\n\n> {feedback}"
+            await skide.send(msg)
+            await interaction.followup.send("Thank you! Your feedback has been sent directly to Skide.", ephemeral=True)
+        else:
+            await interaction.followup.send("Could not reach Skide at the moment. Please try again later.", ephemeral=True)
+    except Exception as e:
+        print(f"DEBUG: Error sending feedback DM: {e}")
+        await interaction.followup.send("An error occurred while attempting to send your feedback.", ephemeral=True)
+
+@bot.tree.command(name="serversettings", description="Open the interactive server settings menu.")
+@app_commands.default_permissions(administrator=True)
+async def serversettings(interaction: discord.Interaction):
+    guild_id = str(interaction.guild_id)
+    if guild_id not in guild_settings:
+        guild_settings[guild_id] = {
+            "announce_channel": None,
+            "announcements_enabled": True,
+            "voice": "en-US-ChristopherNeural"
+        }
+    settings = guild_settings[guild_id]
+    channel_display = f"<#{settings['announce_channel']}>" if settings.get('announce_channel') else "Not Set"
+    embed = discord.Embed(title="Server Settings Dashboard", color=discord.Color.dark_theme())
+    embed.add_field(name="Announcements Status", value=str(settings.get("announcements_enabled", True)), inline=True)
+    embed.add_field(name="Announcement Channel", value=channel_display, inline=True)
+    embed.add_field(name="Current TTS Voice", value=settings.get("voice", "en-US-ChristopherNeural"), inline=False)
+    view = SettingsView(guild_id)
+    await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+
+@bot.tree.command(name="speak", description="Herald will generate and send a voice audio clip.")
+@app_commands.describe(text="The text you want Herald to speak out loud")
+async def speak(interaction: discord.Interaction, text: str):
+    await interaction.response.defer()
+    guild_id = str(interaction.guild_id)
+    voice = guild_settings.get(guild_id, {}).get("voice", "en-US-ChristopherNeural")
+    filename = f"output_{interaction.id}.mp3"
+    communicate = edge_tts.Communicate(text, voice)
+    await communicate.save(filename)
+    await interaction.followup.send(file=discord.File(filename))
+    if os.path.exists(filename):
+        os.remove(filename)
+
+if __name__ == "__main__":
+    if DISCORD_BOT_TOKEN and DISCORD_BOT_TOKEN != "YOUR_DISCORD_BOT_TOKEN_HERE":
+        keep_alive()
+        bot.run(DISCORD_BOT_TOKEN)
+    else:
+        print("ERROR: DISCORD_BOT_TOKEN is not configured! Please provide a valid token.")
