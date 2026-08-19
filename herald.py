@@ -80,30 +80,50 @@ banned_users = load_list(BANNED_USERS_FILE)
 async def save_memory(user_id, history_data):
     channel = bot.get_channel(MEMORY_CHANNEL_ID)
     if not channel:
-        print(f"DEBUG: Memory channel {MEMORY_CHANNEL_ID} not found.")
         return
-    payload = json.dumps({"user_id": str(user_id), "history": history_data})
+        
+    messages_to_delete = []
     async for message in channel.history(limit=100):
         if message.author == bot.user and f'"user_id": "{user_id}"' in message.content:
-            await message.edit(content=f"```json\n{payload}\n```")
-            return
-    await channel.send(content=f"```json\n{payload}\n```")
+            messages_to_delete.append(message)
+            
+    for msg in messages_to_delete:
+        try:
+            await msg.delete()
+        except:
+            pass
+
+    current_chunk = []
+    for item in history_data:
+        current_chunk.append(item)
+        if len(json.dumps({"user_id": str(user_id), "history": current_chunk})) > 1900:
+            current_chunk.pop()
+            if current_chunk:
+                payload = json.dumps({"user_id": str(user_id), "history": current_chunk})
+                await channel.send(content=f"```json\n{payload}\n```")
+            current_chunk = [item]
+            
+    if current_chunk:
+        payload = json.dumps({"user_id": str(user_id), "history": current_chunk})
+        await channel.send(content=f"```json\n{payload}\n```")
 
 async def load_memory(user_id):
     channel = bot.get_channel(MEMORY_CHANNEL_ID)
     if not channel:
-        print(f"DEBUG: Memory channel {MEMORY_CHANNEL_ID} not found.")
         return []
+        
+    full_history = []
     async for message in channel.history(limit=100):
         if message.author == bot.user and f'"user_id": "{user_id}"' in message.content:
             try:
                 clean_text = message.content.strip("`").replace("json\n", "")
                 data = json.loads(clean_text)
-                return data.get("history", [])
-            except Exception as e:
-                print(f"DEBUG: Failed to parse memory for {user_id}: {e}")
-                return []
-    return []
+                chunk_history = data.get("history", [])
+                full_history = chunk_history + full_history
+            except Exception:
+                pass
+                
+    return full_history
 
 class SettingsView(discord.ui.View):
     def __init__(self, guild_id: str):
