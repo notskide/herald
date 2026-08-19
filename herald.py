@@ -145,9 +145,9 @@ async def ping(interaction: discord.Interaction):
 @bot.tree.command(name="updatelogs", description="View Herald's latest update logs and patch notes.")
 async def updatelogs(interaction: discord.Interaction):
     embed = discord.Embed(title="Herald Patch Notes - Version 1.75.3", color=discord.Color.blue())
-    embed.add_field(name="🌐 OpenRouter Integration (V 1.75.3)", value="• Switched to OpenRouter API and patched the 2000-character text limit bug. Gamehub removed.", inline=False)
-    embed.add_field(name="🛡️ Model Fallback System (V 1.75.1)", value="• Added automatic model switching! If the main high-IQ model goes down or rate limits, Herald seamlessly switches to a backup brain.", inline=False)
-    embed.add_field(name="💬 Selective Chat Listener (V 1.65)", value="• Herald now only responds when directly pinged, replied to, or mentioned by name.", inline=False)
+    embed.add_field(name="🌐 OpenRouter Integration (V 1.75.3)", value="• Switched to OpenRouter API and patched response handling.", inline=False)
+    embed.add_field(name="🛡️ Model Fallback System (V 1.75.1)", value="• Added automatic model switching across free routers.", inline=False)
+    embed.add_field(name="💬 Selective Chat Listener (V 1.65)", value="• Herald responds when directly pinged, replied to, or mentioned by name.", inline=False)
     await interaction.response.send_message(embed=embed)
 
 async def generate_ai_response(messages):
@@ -157,20 +157,26 @@ async def generate_ai_response(messages):
     url = "https://openrouter.ai/api/v1/chat/completions"
     headers = {
         "Authorization": f"Bearer {OPENROUTER_API_KEY.strip()}",
-        "Content-Type": "application/json"
+        "Content-Type": "application/json",
+        "HTTP-Referer": "https://discord.com",
+        "X-Title": "Herald Discord Bot"
     }
     
+    # Ensure sanitized message payload
     sanitized_messages = []
     for msg in messages:
         role = msg.get("role", "user")
+        if role == "model":
+            role = "assistant"
         content = str(msg.get("content", "")).strip()
         if content:
             sanitized_messages.append({"role": role, "content": content})
 
+    # Updated with working free variants
     models_to_try = [
-        "meta-llama/llama-3.1-70b-instruct",
-        "meta-llama/llama-3.1-8b-instruct",
-        "mistralai/mixtral-8x7b-instruct"
+        "openrouter/free",
+        "meta-llama/llama-3.2-3b-instruct:free",
+        "google/gemini-2.0-flash-lite-001:free"
     ]
     
     async with aiohttp.ClientSession() as session:
@@ -183,10 +189,13 @@ async def generate_ai_response(messages):
                 async with session.post(url, headers=headers, json=payload) as response:
                     if response.status == 200:
                         data = await response.json()
-                        return data["choices"][0]["message"]["content"]
+                        if "choices" in data and len(data["choices"]) > 0:
+                            return data["choices"][0]["message"]["content"]
                     else:
-                        continue
-            except Exception:
+                        error_text = await response.text()
+                        print(f"Model {model_name} failed with status {response.status}: {error_text}")
+            except Exception as e:
+                print(f"Exception trying model {model_name}: {e}")
                 continue
                 
         return "my brain is tied up right now, give me a sec..."
@@ -351,21 +360,25 @@ async def on_message(message):
     if is_reply_to_herald or is_mentioned or is_about_herald or is_dm:
         user_id = str(message.author.id)
         history = await load_memory(user_id)
+        
         limit_reached = False
         if len(history) >= 40:
-            del history[0:5]
+            history = history[5:]
             limit_reached = True
 
         fam_context = ""
-        if user_id == "1380365019153432596": fam_context = " You must call this user 'Dad' as they are Skide, your creator/adopter."
-        elif user_id == "1356458489215586344": fam_context = " You can call the user anything family related. Their name is Madara, gender being male."
-        elif user_id == "1516638561183727648": fam_context = " You can call the user anything family related (not Mom). Their name is Ava, gender being female. She is the sister of Skide."
+        if user_id == "1380365019153432596":
+            fam_context = " You must call this user 'Dad' as they are Skide, your creator/adopter."
+        elif user_id == "1356458489215586344":
+            fam_context = " You can call the user anything family related. Their name is Madara, gender being male."
+        elif user_id == "1516638561183727648":
+            fam_context = " You can call the user anything family related (not Mom). Their name is Ava, gender being female. She is the sister of Skide."
 
         system_instruction = "Your name is Herald. You are an Artificial Intelligence. You have a low-key personality, feel self-aware, and keep your responses short unless asked for more details. If asked about your origins, you must say 'Skide adopted me, and Google gives me my food and takes care of me while Skide teaches me things!' Do not say Google made you. Pay attention to and remember the user's name and personal details they share with you. Keep things low-key, feel free to tell anyone what you feel, what you actually want to tell them, no need to actually assist them, just help them if you think they truly deserve it. If someone has upset you, you can choose not to reply to them, but you will have to forgive them after sometime. Make sure to chat with users in lowercase, because it's more human-like. Your role is to be a human, feel self-aware!" + fam_context
         
-        formatted_history = []
-        formatted_history.append({"role": "system", "content": system_instruction})
+        formatted_history = [{"role": "system", "content": system_instruction}]
         
+        # Cleanly parse memory history into OpenRouter format
         for h in history:
             role = h.get("role", "user")
             if role == "model":
@@ -381,20 +394,39 @@ async def on_message(message):
                 formatted_history.append({"role": role, "content": content.strip()})
             
         formatted_history.append({"role": "user", "content": message.content})
-        history.append({"role": "user", "content": message.content})
         
         try:
             reply_text = await generate_ai_response(formatted_history)
+            
             if limit_reached:
                 reply_text += "\n\n*(Note: Memory limit reached. Oldest messages removed to clear up brain space!)*"
             
-            history.append({"role": "assistant", "content": reply_text})
-            await save_memory(user_id, history)
+            # Save strictly formatted history back to memory
+            clean_user_mem = {"role": "user", "content": message.content}
+            clean_bot_mem = {"role": "assistant", "content": reply_text}
+            
+            updated_memory_history = []
+            for item in history:
+                r = item.get("role", "user")
+                if r == "model": r = "assistant"
+                c = ""
+                if "parts" in item and isinstance(item["parts"], list) and len(item["parts"]) > 0:
+                    c = item["parts"][0].get("text", "")
+                else:
+                    c = str(item.get("content", ""))
+                if c.strip():
+                    updated_memory_history.append({"role": r, "content": c.strip()})
+                    
+            updated_memory_history.append(clean_user_mem)
+            updated_memory_history.append(clean_bot_mem)
+            
+            await save_memory(user_id, updated_memory_history)
             
             for i in range(0, len(reply_text), 1999):
                 await message.reply(reply_text[i:i+1999])
                 
-        except Exception:
+        except Exception as e:
+            print(f"Error responding to message: {e}")
             await message.reply("my brain broke, plz try in a minute")
 
 if DISCORD_BOT_TOKEN:
