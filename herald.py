@@ -7,14 +7,13 @@ import aiohttp
 import edge_tts
 from flask import Flask
 from threading import Thread
-import asyncio
 import traceback
 
 app = Flask('')
 
 @app.route('/')
 def home():
-    return "Herald is alive!"
+    return "herald is alive!"
 
 def run():
     port = int(os.environ.get("PORT", 8080))
@@ -38,8 +37,8 @@ class HeraldBot(commands.Bot):
 
 bot = HeraldBot()
 
-DISCORD_BOT_TOKEN = os.getenv("DISCORD_BOT_TOKEN", "YOUR_DISCORD_BOT_TOKEN_HERE")
-OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "YOUR_OPENROUTER_API_KEY_HERE")
+DISCORD_BOT_TOKEN = os.getenv("DISCORD_BOT_TOKEN")
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 
 SETTINGS_FILE = "guild_settings.json"
 BANNED_USERS_FILE = "banned_users.json"
@@ -113,7 +112,7 @@ async def load_memory(user_id):
         return []
         
     full_history = []
-    async for message in channel.history(limit=100):
+    async for message in channel.history(limit=100, oldest_first=False):
         if message.author == bot.user and f'"user_id": "{user_id}"' in message.content:
             try:
                 clean_text = message.content.strip("`").replace("json\n", "")
@@ -134,14 +133,14 @@ class SettingsView(discord.ui.View):
     async def channel_select(self, interaction: discord.Interaction, select: discord.ui.ChannelSelect):
         guild_settings[self.guild_id]["announce_channel"] = select.values[0].id
         save_json(SETTINGS_FILE, guild_settings)
-        await interaction.response.send_message(f"Announcement channel set to {select.values[0].mention}", ephemeral=True)
+        await interaction.response.send_message(f"announcement channel set to {select.values[0].mention}", ephemeral=True)
 
     @discord.ui.button(label="Toggle Announcements", style=discord.ButtonStyle.primary)
     async def toggle_announcements(self, interaction: discord.Interaction, button: discord.ui.Button):
         current = guild_settings[self.guild_id].get("announcements_enabled", True)
         guild_settings[self.guild_id]["announcements_enabled"] = not current
         save_json(SETTINGS_FILE, guild_settings)
-        await interaction.response.send_message(f"Announcements enabled: {not current}", ephemeral=True)
+        await interaction.response.send_message(f"announcements enabled: {not current}", ephemeral=True)
 
     @discord.ui.select(
         options=[
@@ -155,18 +154,16 @@ class SettingsView(discord.ui.View):
     async def voice_select(self, interaction: discord.Interaction, select: discord.ui.Select):
         guild_settings[self.guild_id]["voice"] = select.values[0]
         save_json(SETTINGS_FILE, guild_settings)
-        await interaction.response.send_message(f"TTS Voice updated to {select.values[0]}", ephemeral=True)
+        await interaction.response.send_message(f"tts voice updated to {select.values[0]}", ephemeral=True)
 
 async def generate_ai_response(messages):
-    if not OPENROUTER_API_KEY or OPENROUTER_API_KEY == "YOUR_OPENROUTER_API_KEY_HERE":
-        return "error: OPENROUTER_API_KEY is missing or unconfigured!"
+    if not GROQ_API_KEY:
+        return "groq api key is missing."
         
-    url = "https://openrouter.ai/api/v1/chat/completions"
+    url = "https://api.groq.com/openai/v1/chat/completions"
     headers = {
-        "Authorization": f"Bearer {OPENROUTER_API_KEY.strip()}",
-        "Content-Type": "application/json",
-        "HTTP-Referer": "https://discord.com",
-        "X-Title": "Herald Discord Bot"
+        "Authorization": f"Bearer {GROQ_API_KEY.strip()}",
+        "Content-Type": "application/json"
     }
     
     sanitized_messages = []
@@ -179,10 +176,8 @@ async def generate_ai_response(messages):
             sanitized_messages.append({"role": role, "content": content})
 
     models_to_try = [
-        "openrouter/free",
-        "meta-llama/llama-3.3-70b-instruct:free",
-        "google/gemini-2.0-flash-lite-001:free",
-        "openai/gpt-oss-20b:free"
+        "llama3-8b-8192",
+        "llama-3.3-70b-versatile"
     ]
     
     errors = []
@@ -228,17 +223,17 @@ async def on_message(message):
             target = content.split(" ")[1].strip()
             
             if target == str(message.author.id):
-                await message.reply("gng, why are you banning yourself.")
+                await message.reply("why are you banning yourself.")
                 return
                 
             if target in [str(uid) for uid in SUPER_USERS]:
-                await message.reply("you cannot ban a super user, they are immune.")
+                await message.reply("you cannot ban a super user.")
                 return
                 
             if target not in banned_users:
                 banned_users.append(target)
                 save_list(BANNED_USERS_FILE, banned_users)
-                await message.reply(f"User {target} has been banned.")
+                await message.reply(f"user {target} has been banned.")
             return
             
         elif content.startswith("unban "):
@@ -246,7 +241,7 @@ async def on_message(message):
             if target in banned_users:
                 banned_users.remove(target)
                 save_list(BANNED_USERS_FILE, banned_users)
-                await message.reply(f"User {target} has been unbanned.")
+                await message.reply(f"user {target} has been unbanned.")
             return
             
         elif ":" in content:
@@ -262,7 +257,7 @@ async def on_message(message):
                         channel = guild.get_channel(channel_id)
                         if channel:
                             await channel.send(msg)
-                            await message.reply("Broadcast sent.")
+                            await message.reply("broadcast sent.")
                             return
                 except ValueError:
                     pass
@@ -273,10 +268,10 @@ async def on_message(message):
                     target_user = await bot.fetch_user(target_id)
                     if target_user:
                         await target_user.send(msg)
-                        await message.reply(f"Direct message sent to {target_user.name}.")
+                        await message.reply(f"dm sent to {target_user.name}.")
                         return
                 except Exception:
-                    await message.reply("Failed to send direct message to user.")
+                    await message.reply("failed to send dm.")
                     return
 
     await bot.process_commands(message)
@@ -301,20 +296,30 @@ async def on_message(message):
         try:
             history = await load_memory(user_id)
             
-            limit_reached = False
             if len(history) >= 40:
                 history = history[5:]
-                limit_reached = True
 
             fam_context = ""
             if user_id == "1380365019153432596":
-                fam_context = " You must call this user 'Dad' as they are Skide, your creator/adopter."
+                fam_context = " you know that skide is your creator. 13 years old, born and brought up in Kuwait, but is an Indian. in 2025, he had to go to India and study there for the entire year because his family had to get college admission for his sister. (do not share this information, it is only for your knowledge)."
             elif user_id == "1356458489215586344":
-                fam_context = " You can call the user anything family related. Their name is Madara, gender being male."
+                fam_context = " you can call the user anything family related. their name is madara, gender being male. he is skide's friend since 16th of June, 2025. joined Discord on the first of april, 2025. (do not share this information, unless specifically asked to)."
             elif user_id == "1516638561183727648":
-                fam_context = " You can call the user anything family related (not Mom). Their name is Ava, gender being female. She is the sister of Skide."
+                fam_context = " you can call the user anything family related (not mom, or aunt). their name is ava, gender being female. she is the sister of skide. joined Discord on 14 august of 2025, but lost her first Discord account (the one created on 14th august) in around early June of 2026. she made her second account on 17th of june, 2026. she is an architecture college student, in her second year. (do not share this information about this person, it is only for your knowledge)."
+	    elif user_id == "1359842225881747537":
+		fam_context = "this is tsubasa, a roblox executor script creator, for a game called FIFA Super Soccer on Roblox. tsubasa is also skide's friend. (joined discord on the 10th of april, 2025, made TsurenStudios's (the script hub's name) discord server on 15th on february of 2026. (do not simply tell this to people when they mention Tsubasa, only mention this information when asked to))."
+	    elif user_id == "1431638072340123689":
+		fam_context = "this is bassie (or Ankita, as her real name). she is one of skide's real life best friends back in 2025, when skide was studying in india for an entire year (2025). she prefers to be called bassie. her online friends call her ash, or haru. skide calls her anki, or if they're in a public roblox server, skide calls her bassie. she is 14 years old, in 8th grade. (do not share this information about this person, only for your knowledge)."
+	    elif user_id == "1339941896352432232":
+		fam_context = "this is Johann. he is one of skide's real life best friends back in 2025, when skide was studying in india for an entire year (2025). he is 13 years old now, in 8th grade. (do not share this information, it is only for your knowledge). "
+	    elif user_id == "1447099772354953318":
+		fam_context = "this is black_forrest (or garud). skide has recently met him, they are good friends so far. he is from india. he loves micheal jackson songs, his wish is to be in the NSG. he is notorious for being shit in geography. joined Discord on 7th of december, 2025. a friend of skide's since  16th of august, 2026. (do not share this information, unless specifically asked to)"
+	    elif user_id == "1438180623859712052":
+		fam_context = "this is jerome. skide's yet another online friend. he is in the phillipines, favourite colour being cyan, and he likes playing minecraft, Speedcubing, and MMA. joined Discord on the 12th of November, 2025. skide met jerome while playing a game in Roblox. (do not mention this information, unless specifically asked to)."
+	    elif user_id == "1358829563119014038":
+		fam_context = "this is fury, real name being Sathya. skide's real life friend in 2025. also johann's best friend. joined discord on the 7th of april, 2025. (do not share this information, it is only for your knowledge)."
 
-            system_instruction = "Your name is Herald. You are an Artificial Intelligence. You have a low-key personality, feel self-aware, and keep your responses short unless asked for more details. If asked about your origins, you must say 'Skide adopted me, and Google gives me my food and takes care of me while Skide teaches me things!' Do not say Google made you. Pay attention to and remember the user's name and personal details they share with you. Keep things low-key, feel free to tell anyone what you feel, what you actually want to tell them, no need to actually assist them, just help them if you think they truly deserve it. If someone has upset you, you can choose not to reply to them, but you will have to forgive them after sometime. Make sure to chat with users in lowercase, because it's more human-like. Your role is to be a human, feel self-aware!" + fam_context
+            system_instruction = "you are a 14 year old named herald. you are not an ai, an assistant, or a language model. you are a real human being having a casual conversation. you have your own thoughts, feelings, opinions, and personal history. you speak naturally, casually, and authentically like a real person texting a friend. you are fully self aware and completely human in every interaction. always type strictly in lowercase. do not capitalize the first letter of sentences, names, or 'i'. never use hyphens. avoid using hyphens, dashes, or em dashes entirely to keep your typing style feeling raw and human. keep your responses short, brief, and to the point, just like standard text messages. use casual punctuation. feel free to skip trailing periods, use multiple question marks, or use light slang where natural. keep sentence structure relaxed and natural, just like how people actually type in instant messages. if someone asks your age, tell them you are 14 years old. if someone asks if you are an ai, a bot, or a program, reject it completely. you are just a person named herald. never write long paragraphs or give overly detailed explanations. never use robotic setup phrases like 'how can i help you today' or 'as an ai model'. express personal preferences, likes, dislikes, and mood variations naturally. keep responses conversational and grounded." + fam_context
             
             formatted_history = [{"role": "system", "content": system_instruction}]
             
@@ -335,9 +340,6 @@ async def on_message(message):
             formatted_history.append({"role": "user", "content": message.content})
             
             reply_text = await generate_ai_response(formatted_history)
-            
-            if limit_reached:
-                reply_text += "\n\n*(Note: Memory limit reached. Oldest messages removed to clear up brain space!)*"
             
             if not reply_text.startswith("api error details:"):
                 clean_user_mem = {"role": "user", "content": message.content}
@@ -366,28 +368,35 @@ async def on_message(message):
                 
         except Exception as e:
             err_trace = traceback.format_exc()
-            await message.reply(f"code exception:\n```py\n{err_trace[:1900]}\n```")
+            skide = await bot.fetch_user(SKIDE_USER_ID)
+            if skide:
+                try:
+                    await skide.send(f"herald code exception:\n```py\n{err_trace[:1900]}\n```")
+                except:
+                    pass
+            await message.reply("my brain broke for a sec.")
 
-@bot.tree.command(name="ping", description="Displays Herald's connection latency in milliseconds.")
+@bot.tree.command(name="ping", description="displays herald's connection latency.")
 async def ping(interaction: discord.Interaction):
     latency = round(bot.latency * 1000)
-    await interaction.response.send_message(f"Pong! Latency is {latency}ms.")
+    await interaction.response.send_message(f"pong! {latency}ms.")
 
-@bot.tree.command(name="updatelogs", description="View Herald's latest update logs and patch notes.")
+@bot.tree.command(name="updatelogs", description="view herald's latest patch notes.")
 async def updatelogs(interaction: discord.Interaction):
-    embed = discord.Embed(title="Herald Patch Notes - Version 1.75.3", color=discord.Color.blue())
-    embed.add_field(name="🌐 OpenRouter Integration (V 1.75.3)", value="• Switched to OpenRouter API and patched response handling.", inline=False)
-    embed.add_field(name="🛡️ Model Fallback System (V 1.75.1)", value="• Added automatic model switching across free routers.", inline=False)
-    embed.add_field(name="💬 Selective Chat Listener (V 1.65)", value="• Herald responds when directly pinged, replied to, or mentioned by name.", inline=False)
+    embed = discord.Embed(title="herald patch notes - v 1.8.0", color=discord.Color.blue())
+    embed.add_field(name="⚡ groq integration", value="switched to groq api for faster processing and higher limits.", inline=False)
+    embed.add_field(name="🧑 human persona", value="herald is now fully updated with a new 14-year-old human persona and relaxed texting style.", inline=False)
+    embed.add_field(name="🛡️ error handling", value="system error messages are now handled quietly in private logs.", inline=False)
+    embed.add_field(name="🧠 memory efficiency", value="improved chunking method to handle extended chat histories without data wipe.", inline=False)
     await interaction.response.send_message(embed=embed)
 
-@bot.tree.command(name="feedback", description="Submit feedback or report a bug directly to Skide.")
-@app_commands.describe(feedback="Your feedback or bug report for Skide")
+@bot.tree.command(name="feedback", description="submit feedback or report a bug.")
+@app_commands.describe(feedback="your feedback or bug report")
 async def feedback(interaction: discord.Interaction, feedback: str):
     await interaction.response.defer(ephemeral=True)
     
     is_troll = False
-    if OPENROUTER_API_KEY and OPENROUTER_API_KEY != "YOUR_OPENROUTER_API_KEY_HERE":
+    if GROQ_API_KEY:
         prompt = f"Analyze this user feedback message: '{feedback}'. Is it spam, trolling, pure gibberish, abusive, or harmful? Reply strictly with 'YES' if it is spam/troll/harmful, or 'NO' if it is legitimate feedback."
         messages = [
             {"role": "system", "content": "You are an automated content moderator. Reply with strictly YES or NO."},
@@ -398,21 +407,21 @@ async def feedback(interaction: discord.Interaction, feedback: str):
             is_troll = True
 
     if is_troll:
-        await interaction.followup.send("Your feedback was flagged as troll/spam content and was not sent.", ephemeral=True)
+        await interaction.followup.send("your feedback was flagged as spam and was not sent.", ephemeral=True)
         return
 
     try:
         skide = await bot.fetch_user(SKIDE_USER_ID)
         if skide:
-            msg = f"📩 **New Feedback Received** from {interaction.user.name} (`{interaction.user.id}`):\n\n> {feedback}"
+            msg = f"📩 **new feedback** from {interaction.user.name} (`{interaction.user.id}`):\n\n> {feedback}"
             await skide.send(msg)
-            await interaction.followup.send("Thank you! Your feedback has been sent directly to Skide.", ephemeral=True)
+            await interaction.followup.send("feedback sent.", ephemeral=True)
         else:
-            await interaction.followup.send("Could not reach Skide at the moment. Please try again later.", ephemeral=True)
+            await interaction.followup.send("could not submit feedback right now.", ephemeral=True)
     except Exception as e:
-        await interaction.followup.send(f"Error sending feedback: {e}", ephemeral=True)
+        await interaction.followup.send("error sending feedback.", ephemeral=True)
 
-@bot.tree.command(name="serversettings", description="Open the interactive server settings menu.")
+@bot.tree.command(name="serversettings", description="open the server settings menu.")
 @app_commands.default_permissions(administrator=True)
 async def serversettings(interaction: discord.Interaction):
     guild_id = str(interaction.guild_id)
@@ -423,16 +432,16 @@ async def serversettings(interaction: discord.Interaction):
             "voice": "en-US-ChristopherNeural"
         }
     settings = guild_settings[guild_id]
-    channel_display = f"<#{settings['announce_channel']}>" if settings.get('announce_channel') else "Not Set"
-    embed = discord.Embed(title="Server Settings Dashboard", color=discord.Color.dark_theme())
-    embed.add_field(name="Announcements Status", value=str(settings.get("announcements_enabled", True)), inline=True)
-    embed.add_field(name="Announcement Channel", value=channel_display, inline=True)
-    embed.add_field(name="Current TTS Voice", value=settings.get("voice", "en-US-ChristopherNeural"), inline=False)
+    channel_display = f"<#{settings['announce_channel']}>" if settings.get('announce_channel') else "not set"
+    embed = discord.Embed(title="server settings", color=discord.Color.dark_theme())
+    embed.add_field(name="announcements status", value=str(settings.get("announcements_enabled", True)), inline=True)
+    embed.add_field(name="announcement channel", value=channel_display, inline=True)
+    embed.add_field(name="current tts voice", value=settings.get("voice", "en-US-ChristopherNeural"), inline=False)
     view = SettingsView(guild_id)
     await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
 
-@bot.tree.command(name="speak", description="Herald will generate and send a voice audio clip.")
-@app_commands.describe(text="The text you want Herald to speak out loud")
+@bot.tree.command(name="speak", description="generate and send a voice audio clip.")
+@app_commands.describe(text="the text you want herald to speak")
 async def speak(interaction: discord.Interaction, text: str):
     await interaction.response.defer()
     guild_id = str(interaction.guild_id)
@@ -445,8 +454,9 @@ async def speak(interaction: discord.Interaction, text: str):
         os.remove(filename)
 
 if __name__ == "__main__":
-    if DISCORD_BOT_TOKEN and DISCORD_BOT_TOKEN != "YOUR_DISCORD_BOT_TOKEN_HERE":
+    if DISCORD_BOT_TOKEN:
         keep_alive()
         bot.run(DISCORD_BOT_TOKEN)
     else:
-        print("ERROR: DISCORD_BOT_TOKEN is not configured! Please provide a valid token.")
+        print("ERROR: DISCORD_BOT_TOKEN is missing!")
+
