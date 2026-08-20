@@ -176,8 +176,8 @@ async def generate_ai_response(messages):
             sanitized_messages.append({"role": role, "content": content})
 
     models_to_try = [
-        "llama3-8b-8192",
-        "llama-3.3-70b-versatile"
+        "openai/gpt-oss-20b",
+        "openai/gpt-oss-120b"
     ]
     
     errors = []
