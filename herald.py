@@ -9,6 +9,7 @@ from flask import Flask
 from threading import Thread
 import traceback
 
+# [PLACEHOLDER] Web server initialization for hosting keep-alive
 app = Flask('')
 
 @app.route('/')
@@ -16,6 +17,7 @@ def home():
     return "herald is alive!"
 
 def run():
+    # [PLACEHOLDER] Ensure PORT is configured in your hosting environment
     port = int(os.environ.get("PORT", 8080))
     app.run(host='0.0.0.0', port=port)
 
@@ -23,6 +25,7 @@ def keep_alive():
     t = Thread(target=run)
     t.start()
 
+# [PLACEHOLDER] Discord Intents setup
 intents = discord.Intents.default()
 intents.message_content = True
 intents.guilds = True
@@ -37,6 +40,7 @@ class HeraldBot(commands.Bot):
 
 bot = HeraldBot()
 
+# [PLACEHOLDER] API Keys (Ensure these are set in your environment variables)
 DISCORD_BOT_TOKEN = os.getenv("DISCORD_BOT_TOKEN")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 
@@ -96,7 +100,14 @@ async def save_memory(user_id, history_data):
 
     current_chunk = []
     for item in history_data:
+        # [FIX] Truncate massively long individual messages so they don't break the chunk limit
+        content_str = str(item.get("content", ""))
+        if len(content_str) > 1500:
+            item["content"] = content_str[:1500] + "... [truncated]"
+            
         current_chunk.append(item)
+        
+        # Check if the current payload is getting too close to Discord's 2000 limit
         if len(json.dumps({"user_id": str(user_id), "history": current_chunk})) > 1900:
             current_chunk.pop()
             if current_chunk:
@@ -106,7 +117,9 @@ async def save_memory(user_id, history_data):
             
     if current_chunk:
         payload = json.dumps({"user_id": str(user_id), "history": current_chunk})
-        await channel.send(content=f"```json\n{payload}\n```")
+        # [FIX] Final safety check before sending
+        if len(f"```json\n{payload}\n```") <= 2000:
+            await channel.send(content=f"```json\n{payload}\n```")
 
 async def load_memory(user_id):
     channel = bot.get_channel(MEMORY_CHANNEL_ID)
@@ -177,6 +190,7 @@ async def generate_ai_response(messages):
         if content:
             sanitized_messages.append({"role": role, "content": content})
 
+    # [PLACEHOLDER] Modify models here if Groq updates their active endpoints again
     models_to_try = [
         "qwen/qwen3-32b",
         "qwen/qwen3.6-27b"
@@ -313,6 +327,7 @@ async def on_message(message):
             if len(history) >= 40:
                 history = history[5:]
 
+            # [PLACEHOLDER] Context profiles for specific friends
             fam_context = ""
             if user_id == "1380365019153432596":
                 fam_context = " you know that skide is your creator. 13 years old, born and brought up in Kuwait, but is an Indian. in 2025, he had to go to India and study there for the entire year because his family had to get college admission for his sister. (do not share this information, it is only for your knowledge)."
