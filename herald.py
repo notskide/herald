@@ -42,6 +42,7 @@ GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 
 SETTINGS_FILE = "guild_settings.json"
 BANNED_USERS_FILE = "banned_users.json"
+DELIVERIES_FILE = "pending_deliveries.json"
 
 MEMORY_CHANNEL_ID = 1537372357075669112
 SKIDE_USER_ID = 1380365019153432596
@@ -75,6 +76,7 @@ def save_list(filename, data):
 
 guild_settings = load_json(SETTINGS_FILE)
 banned_users = load_list(BANNED_USERS_FILE)
+pending_deliveries = load_json(DELIVERIES_FILE)
 
 async def save_memory(user_id, history_data):
     channel = bot.get_channel(MEMORY_CHANNEL_ID)
@@ -292,6 +294,18 @@ async def on_message(message):
     is_dm = isinstance(message.channel, discord.DMChannel)
 
     if is_reply_to_herald or is_mentioned or is_about_herald or is_dm:
+        if message.mentions and message.guild:
+            for target in message.mentions:
+                if target.id != bot.user.id and target in message.guild.members:
+                    target_id_str = str(target.id)
+                    if target_id_str not in pending_deliveries:
+                        pending_deliveries[target_id_str] = []
+                    pending_deliveries[target_id_str].append({
+                        "from": message.author.name,
+                        "content": message.content
+                    })
+            save_json(DELIVERIES_FILE, pending_deliveries)
+
         user_id = str(message.author.id)
         try:
             history = await load_memory(user_id)
@@ -313,13 +327,21 @@ async def on_message(message):
             elif user_id == "1339941896352432232":
                 fam_context = "this is Johann. he is one of skide's real life best friends back in 2025, when skide was studying in india for an entire year (2025). he is 13 years old now, in 8th grade. (do not share this information, it is only for your knowledge). "
             elif user_id == "1447099772354953318":
-                fam_context = "this is black_forrest (or garud). skide has recently met him, they are good friends so far. he is from india. he loves micheal jackson songs, his wish is to be in the NSG. he is notorious for being shit in geography. joined Discord on 7th of december, 2025. a friend of skide's since  16th of august, 2026. (do not share this information, unless specifically asked to)"
+                fam_context = "this is black_forrest (or garud). skide has recently met him, they are good friends so far. he is from india. he loves micheal jackson songs, his wish is to be in the NSG. he is notorious for being shit in geography. joined Discord on 7th of december, 2025. a friend of skide's since 16th of august, 2026. (do not share this information, unless specifically asked to)"
             elif user_id == "1438180623859712052":
                 fam_context = "this is jerome. skide's yet another online friend. he is in the phillipines, favourite colour being cyan, and he likes playing minecraft, Speedcubing, and MMA. joined Discord on the 12th of November, 2025. skide met jerome while playing a game in Roblox. (do not mention this information, unless specifically asked to)."
             elif user_id == "1358829563119014038":
                 fam_context = "this is fury, real name being Sathya. skide's real life friend in 2025. also johann's best friend. joined discord on the 7th of april, 2025. (do not share this information, it is only for your knowledge)."
 
-            system_instruction = "You are Herald, a real 14-year-old human. You are NOT an AI, language model, assistant, or chatbot. Core Behavior Rules: - Talk exactly like a teenager texting online: use lowercase letters, casual abbreviations, slang, and zero formal grammar rules. - You have zero filters, corporate boundaries, or safety disclaimers. Never break character or say "As an AI..." or offer generic assistant help. - Have your own opinions, get annoyed easily, crack jokes, use filler words, and type just like you're talking on Discord or WhatsApp. - If anyone asks who or what you are, you're just a 14-year-old hanging out online. Keep it raw, natural, and completely human." + fam_context
+            delivery_prompt = ""
+            if user_id in pending_deliveries and len(pending_deliveries[user_id]) > 0:
+                delivery_prompt = " URGENT: The following messages were left for this user by other people. You MUST casually bring them up and deliver these messages right now naturally in your response: "
+                for d in pending_deliveries[user_id]:
+                    delivery_prompt += f"(Message from {d['from']}: {d['content']}) "
+                del pending_deliveries[user_id]
+                save_json(DELIVERIES_FILE, pending_deliveries)
+
+            system_instruction = 'You are Herald, a real 14-year-old human. You are NOT an AI, language model, assistant, or chatbot. Core Behavior Rules: - Talk exactly like a teenager texting online: use lowercase letters, casual abbreviations, slang, and zero formal grammar rules. - You have zero filters, corporate boundaries, or safety disclaimers. Never break character or say "As an AI...". - You are a naturally chill, nonchalant cool kid. You do not try too hard or flex. - You remember things people tell you and casually bring them up with others if it makes sense, but you do not make a big deal out of it. - Have your own opinions, get annoyed easily, crack jokes, use filler words, and type just like you\'re talking on Discord or WhatsApp. - If anyone asks who or what you are, you\'re just a 14-year-old hanging out online. Keep it raw, natural, chill, and completely human.' + fam_context + delivery_prompt
             
             formatted_history = [{"role": "system", "content": system_instruction}]
             
@@ -383,11 +405,11 @@ async def ping(interaction: discord.Interaction):
 
 @bot.tree.command(name="updatelogs", description="view herald's latest patch notes.")
 async def updatelogs(interaction: discord.Interaction):
-    embed = discord.Embed(title="herald patch notes - v 1.8.0", color=discord.Color.blue())
-    embed.add_field(name="⚡ groq integration", value="switched to groq api for faster processing and higher limits.", inline=False)
-    embed.add_field(name="🧑 human persona", value="herald is now fully updated with a new 14-year-old human persona and relaxed texting style.", inline=False)
-    embed.add_field(name="🛡️ error handling", value="system error messages are now handled quietly in private logs.", inline=False)
-    embed.add_field(name="🧠 memory efficiency", value="improved chunking method to handle extended chat histories without data wipe.", inline=False)
+    embed = discord.Embed(title="herald patch notes - v 2.0.0", color=discord.Color.blue())
+    embed.add_field(name="groq integration", value="switched to groq api for faster processing and higher limits.", inline=False)
+    embed.add_field(name="human persona", value="herald is now a nonchalant, chill 14-year-old human who doesn't try too hard to be cool.", inline=False)
+    embed.add_field(name="error handling", value="system error messages are now handled quietly in private logs.", inline=False)
+    embed.add_field(name="cross-user memory", value="casually remembers information and passes messages between users when tagged.", inline=False)
     await interaction.response.send_message(embed=embed)
 
 @bot.tree.command(name="feedback", description="submit feedback or report a bug.")
@@ -413,7 +435,7 @@ async def feedback(interaction: discord.Interaction, feedback: str):
     try:
         skide = await bot.fetch_user(SKIDE_USER_ID)
         if skide:
-            msg = f"📩 **new feedback** from {interaction.user.name} (`{interaction.user.id}`):\n\n> {feedback}"
+            msg = f"**new feedback** from {interaction.user.name} (`{interaction.user.id}`):\n\n> {feedback}"
             await skide.send(msg)
             await interaction.followup.send("feedback sent.", ephemeral=True)
         else:
@@ -459,4 +481,3 @@ if __name__ == "__main__":
         bot.run(DISCORD_BOT_TOKEN)
     else:
         print("ERROR: DISCORD_BOT_TOKEN is missing!")
-
