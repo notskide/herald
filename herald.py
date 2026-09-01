@@ -1,5 +1,6 @@
 import os
 import json
+import re
 import discord
 from discord import app_commands
 from discord.ext import commands
@@ -9,7 +10,6 @@ from flask import Flask
 from threading import Thread
 import traceback
 
-# [PLACEHOLDER] Web server initialization for hosting keep-alive
 app = Flask('')
 
 @app.route('/')
@@ -17,7 +17,6 @@ def home():
     return "herald is alive!"
 
 def run():
-    # [PLACEHOLDER] Ensure PORT is configured in your hosting environment
     port = int(os.environ.get("PORT", 8080))
     app.run(host='0.0.0.0', port=port)
 
@@ -25,7 +24,6 @@ def keep_alive():
     t = Thread(target=run)
     t.start()
 
-# [PLACEHOLDER] Discord Intents setup
 intents = discord.Intents.default()
 intents.message_content = True
 intents.guilds = True
@@ -40,7 +38,6 @@ class HeraldBot(commands.Bot):
 
 bot = HeraldBot()
 
-# [PLACEHOLDER] API Keys (Ensure these are set in your environment variables)
 DISCORD_BOT_TOKEN = os.getenv("DISCORD_BOT_TOKEN")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 
@@ -82,6 +79,10 @@ guild_settings = load_json(SETTINGS_FILE)
 banned_users = load_list(BANNED_USERS_FILE)
 pending_deliveries = load_json(DELIVERIES_FILE)
 
+def clean_think_tags(text):
+    cleaned = re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL)
+    return cleaned.strip()
+
 async def save_memory(user_id, history_data):
     channel = bot.get_channel(MEMORY_CHANNEL_ID)
     if not channel:
@@ -100,14 +101,12 @@ async def save_memory(user_id, history_data):
 
     current_chunk = []
     for item in history_data:
-        # [FIX] Truncate massively long individual messages so they don't break the chunk limit
         content_str = str(item.get("content", ""))
         if len(content_str) > 1500:
             item["content"] = content_str[:1500] + "... [truncated]"
             
         current_chunk.append(item)
         
-        # Check if the current payload is getting too close to Discord's 2000 limit
         if len(json.dumps({"user_id": str(user_id), "history": current_chunk})) > 1900:
             current_chunk.pop()
             if current_chunk:
@@ -117,7 +116,6 @@ async def save_memory(user_id, history_data):
             
     if current_chunk:
         payload = json.dumps({"user_id": str(user_id), "history": current_chunk})
-        # [FIX] Final safety check before sending
         if len(f"```json\n{payload}\n```") <= 2000:
             await channel.send(content=f"```json\n{payload}\n```")
 
@@ -190,7 +188,6 @@ async def generate_ai_response(messages):
         if content:
             sanitized_messages.append({"role": role, "content": content})
 
-    # [PLACEHOLDER] Modify models here if Groq updates their active endpoints again
     models_to_try = [
         "qwen/qwen3-32b",
         "qwen/qwen3.6-27b"
@@ -209,7 +206,9 @@ async def generate_ai_response(messages):
                     if response.status == 200:
                         data = await response.json()
                         if "choices" in data and len(data["choices"]) > 0:
-                            return data["choices"][0]["message"]["content"]
+                            raw_reply = data["choices"][0]["message"]["content"]
+                            cleaned_reply = clean_think_tags(raw_reply)
+                            return cleaned_reply if cleaned_reply else "..."
                         else:
                             errors.append(f"[{model_name}] 200 OK but empty choices: {data}")
                     else:
@@ -327,7 +326,6 @@ async def on_message(message):
             if len(history) >= 40:
                 history = history[5:]
 
-            # [PLACEHOLDER] Context profiles for specific friends
             fam_context = ""
             if user_id == "1380365019153432596":
                 fam_context = " you know that skide is your creator. 13 years old, born and brought up in Kuwait, but is an Indian. in 2025, he had to go to India and study there for the entire year because his family had to get college admission for his sister. (do not share this information, it is only for your knowledge)."
@@ -420,7 +418,7 @@ async def ping(interaction: discord.Interaction):
 
 @bot.tree.command(name="updatelogs", description="view herald's latest patch notes.")
 async def updatelogs(interaction: discord.Interaction):
-    embed = discord.Embed(title="herald patch notes - v 2.0.0", color=discord.Color.blue())
+    embed = discord.Embed(title="herald patch notes - v 2.15", color=discord.Color.blue())
     embed.add_field(name="groq integration", value="switched to groq api for faster processing and higher limits.", inline=False)
     embed.add_field(name="human persona", value="herald is now a nonchalant, chill 14-year-old human who doesn't try too hard to be cool.", inline=False)
     embed.add_field(name="error handling", value="system error messages are now handled quietly in private logs.", inline=False)
