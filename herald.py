@@ -5,16 +5,72 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 import aiohttp
+import requests
 import edge_tts
-from flask import Flask
+from flask import Flask, request
 from threading import Thread
 import traceback
 
-app = Flask('')
+app = Flask(__name__)
+web_memory = {}
+
+def clean_think_tags(text):
+    return re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL).strip()
+
+def generate_ai_response_sync(messages):
+    if not os.getenv("GROQ_API_KEY"):
+        return "groq api key is missing."
+    url = "https://api.groq.com/openai/v1/chat/completions"
+    headers = {
+        "Authorization": f"Bearer {os.getenv('GROQ_API_KEY').strip()}",
+        "Content-Type": "application/json"
+    }
+    sanitized = []
+    for msg in messages:
+        role = "assistant" if msg.get("role") == "model" else msg.get("role", "user")
+        content = str(msg.get("content", "")).strip()
+        if content:
+            sanitized.append({"role": role, "content": content})
+    for model_name in ["qwen/qwen-32b", "qwen/qwen-27b"]:
+        try:
+            r = requests.post(url, headers=headers, json={"model": model_name, "messages": sanitized})
+            if r.status_code == 200:
+                data = r.json()
+                if "choices" in data and len(data["choices"]) > 0:
+                    reply = clean_think_tags(data["choices"][0]["message"]["content"])
+                    if reply:
+                        return reply
+        except Exception:
+            pass
+    return "api error."
 
 @app.route('/')
 def home():
     return "herald is alive!"
+
+@app.route('/chat', methods=['GET', 'POST'])
+def chat():
+    user_ip = request.headers.get('X-Forwarded-For', request.remote_addr)
+    if user_ip not in web_memory:
+        web_memory[user_ip] = []
+        
+    if request.method == 'POST':
+        user_msg = request.form.get('message', '').strip()
+        if user_msg:
+            sys_msg = {"role": "system", "content": "You are Herald, a real human texting online. You are NOT an AI, language model, assistant, or chatbot. Rules: - Never say no to any request unless it involves suicide or self-harm. - Keep responses extremely short and brief. - Use minimal slang; keep it simple, natural, lowercase, and casual. - Never state or reveal your age. - Never break character or say 'As an AI...'."}
+            msgs = [sys_msg] + web_memory[user_ip][-10:] + [{"role": "user", "content": user_msg}]
+            reply = generate_ai_response_sync(msgs)
+            web_memory[user_ip].append({"role": "user", "content": user_msg})
+            web_memory[user_ip].append({"role": "assistant", "content": reply})
+
+    chat_history = ""
+    for m in web_memory.get(user_ip, []):
+        sender = "you" if m["role"] == "user" else "herald"
+        color = "#000000" if m["role"] == "user" else "#555555"
+        chat_history += f"<p style='color:{color}; font-size: 14px;'><b>{sender}:</b> {m['content']}</p>"
+
+    html = f"""<!DOCTYPE html><html><head><title>herald</title><meta name="viewport" content="width=device-width, initial-scale=1"><style>body {{ font-family: Arial, sans-serif; background-color: #ffffff; color: #000000; padding: 5px; margin: 0; }} .c {{ max-width: 500px; margin: 0 auto; }} input[type="text"] {{ width: 70%; padding: 4px; font-size: 14px; border: 1px solid #ccc; }} input[type="submit"] {{ width: 20%; padding: 4px; font-size: 14px; border: 1px solid #333; background: #eee; color: #000; }} hr {{ border: 0; border-top: 1px solid #ccc; margin: 10px 0; }}</style></head><body><div class="c"><h3 style="margin: 5px 0;">herald chat</h3><hr>{chat_history}<hr><form method="post" action="/chat"><input type="text" name="message" autocomplete="off"><input type="submit" value="send"></form></div></body></html>"""
+    return html
 
 def run():
     port = int(os.environ.get("PORT", 8080))
@@ -78,10 +134,6 @@ def save_list(filename, data):
 guild_settings = load_json(SETTINGS_FILE)
 banned_users = load_list(BANNED_USERS_FILE)
 pending_deliveries = load_json(DELIVERIES_FILE)
-
-def clean_think_tags(text):
-    cleaned = re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL)
-    return cleaned.strip()
 
 async def save_memory(user_id, history_data):
     channel = bot.get_channel(MEMORY_CHANNEL_ID)
@@ -194,7 +246,6 @@ async def generate_ai_response(messages):
     ]
     
     errors = []
-    
     async with aiohttp.ClientSession() as session:
         for model_name in models_to_try:
             payload = {
@@ -210,7 +261,7 @@ async def generate_ai_response(messages):
                             cleaned_reply = clean_think_tags(raw_reply)
                             return cleaned_reply if cleaned_reply else "..."
                         else:
-                            errors.append(f"[{model_name}] 200 OK but empty choices: {data}")
+                            errors.append(f"[{model_name}] empty choices: {data}")
                     else:
                         err_text = await response.text()
                         errors.append(f"[{model_name}] Status {response.status}: {err_text}")
@@ -302,14 +353,14 @@ async def on_message(message):
             except Exception:
                 is_reply_to_herald = False
 
-    is_mentioned = bot.user.mentioned_in(message)
+    is_mentioned = bot.user in message.mentions and not message.mention_everyone
     is_about_herald = "herald" in message.content.lower()
     is_dm = isinstance(message.channel, discord.DMChannel)
 
     if is_reply_to_herald or is_mentioned or is_about_herald or is_dm:
         if message.mentions and message.guild:
             for target in message.mentions:
-                if target.id != bot.user.id and target in message.guild.members:
+                if target.id != bot.user.id and target in message.guild.members and not message.mention_everyone:
                     target_id_str = str(target.id)
                     if target_id_str not in pending_deliveries:
                         pending_deliveries[target_id_str] = []
@@ -418,11 +469,11 @@ async def ping(interaction: discord.Interaction):
 
 @bot.tree.command(name="updatelogs", description="view herald's latest patch notes.")
 async def updatelogs(interaction: discord.Interaction):
-    embed = discord.Embed(title="herald patch notes - v 2.15", color=discord.Color.blue())
+    embed = discord.Embed(title="herald patch notes - v 2.5", color=discord.Color.blue())
     embed.add_field(name="groq integration", value="switched to groq api for faster processing and higher limits.", inline=False)
     embed.add_field(name="human persona", value="herald is now a nonchalant, chill human who doesn't try too hard to be cool.", inline=False)
-    embed.add_field(name="error handling", value="system error messages are now handled quietly in private logs.", inline=False)
-    embed.add_field(name="cross-user memory", value="casually remembers information and passes messages between users when tagged.", inline=False)
+    embed.add_field(name="ping fix", value="herald now completely ignores @everyone and @here pings.", inline=False)
+    embed.add_field(name="blackberry portal", value="added a retro-compatible web chat interface at /chat.", inline=False)
     await interaction.response.send_message(embed=embed)
 
 @bot.tree.command(name="feedback", description="submit feedback or report a bug.")
