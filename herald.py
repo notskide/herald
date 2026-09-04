@@ -50,11 +50,7 @@ SKIDE_USER_ID = 1380365019153432596
 SUPER_USERS = [1380365019153432596, 1516638561183727648]
 
 FALLBACK_MODELS = [
-    "llama-3.1-8b-instant",
-    "llama-3.3-70b-versatile",
-    "qwen-2.5-32b",
-    "qwen/qwen3-32b",
-    "mixtral-8x7b-32768"
+    "qwen/qwen3.6-27b"
 ]
 
 def load_json(filename):
@@ -606,3 +602,4 @@ if __name__ == "__main__":
         bot.run(DISCORD_BOT_TOKEN)
     else:
         print("ERROR: DISCORD_BOT_TOKEN is missing!")
+
