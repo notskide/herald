@@ -50,7 +50,8 @@ SKIDE_USER_ID = 1380365019153432596
 SUPER_USERS = [1380365019153432596, 1516638561183727648]
 
 FALLBACK_MODELS = [
-    "qwen/qwen3.6-27b"
+    "qwen/qwen3.6-27b",
+    "qwen/qwen3.8-27b"
 ]
 
 def load_json(filename):
