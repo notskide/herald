@@ -7,16 +7,10 @@ from threading import Thread
 import aiohttp
 import requests
 import edge_tts
-from flask import Flask, request, jsonify
-import discord
-from discord import app_commands
-from discord.ext import commands
+from flask import Flask, request, jsonify, session
 
 app = Flask(__name__)
-
-@app.route("/")
-def home():
-    return "<h1>Herald is online!</h1>"
+app.secret_key = os.getenv("FLASK_SECRET_KEY", "herald_web_secret_2026")
 
 def run_flask():
     port = int(os.environ.get("PORT", 8080))
@@ -25,6 +19,10 @@ def run_flask():
 def keep_alive():
     t = Thread(target=run_flask)
     t.start()
+
+import discord
+from discord import app_commands
+from discord.ext import commands
 
 intents = discord.Intents.default()
 intents.message_content = True
@@ -181,6 +179,38 @@ class SettingsView(discord.ui.View):
         save_json(SETTINGS_FILE, guild_settings)
         await interaction.response.send_message(f"tts voice updated to {select.values[0]}", ephemeral=True)
 
+def generate_ai_response_sync(messages):
+    api_key = GROQ_API_KEY or os.getenv("GROQ_API_KEY")
+    if not api_key:
+        return "groq api key is missing."
+
+    url = "https://api.groq.com/openai/v1/chat/completions"
+    headers = {
+        "Authorization": f"Bearer {api_key.strip()}",
+        "Content-Type": "application/json"
+    }
+
+    sanitized = []
+    for msg in messages:
+        role = "assistant" if msg.get("role") == "model" else msg.get("role", "user")
+        content = str(msg.get("content", "")).strip()
+        if content:
+            sanitized.append({"role": role, "content": content})
+
+    for model_name in FALLBACK_MODELS:
+        try:
+            r = requests.post(url, headers=headers, json={"model": model_name, "messages": sanitized}, timeout=10)
+            if r.status_code == 200:
+                resp_json = r.json()
+                if "choices" in resp_json and len(resp_json["choices"]) > 0:
+                    reply = clean_think_tags(resp_json["choices"][0]["message"]["content"])
+                    if reply:
+                        return reply
+        except Exception:
+            continue
+
+    return "api error"
+
 async def generate_ai_response(messages):
     api_key = GROQ_API_KEY or os.getenv("GROQ_API_KEY")
     if not api_key:
@@ -228,6 +258,70 @@ async def generate_ai_response(messages):
                 
         return "api error details:\n" + "\n".join(errors)
 
+@app.route("/", methods=["GET", "POST"])
+def home():
+    if "chat_history" not in session:
+        session["chat_history"] = []
+
+    if request.method == "POST":
+        user_input = request.form.get("message", "").strip()
+        if user_input:
+            history = session["chat_history"]
+            history.append({"role": "user", "content": user_input})
+            
+            system_instruction = "You are Herald, a real human texting online. Keep responses short, casual, and lowercase."
+            formatted_messages = [{"role": "system", "content": system_instruction}] + history
+            
+            ai_reply = generate_ai_response_sync(formatted_messages)
+            history.append({"role": "assistant", "content": ai_reply})
+            session["chat_history"] = history
+
+    chat_html_list = []
+    for msg in session.get("chat_history", []):
+        sender = "You" if msg["role"] == "user" else "Herald"
+        color = "#a6d2ff" if msg["role"] == "user" else "#85e3a0"
+        chat_html_list.append(
+            f'<div style="margin-bottom: 8px; padding: 6px; border-bottom: 1px solid #333333;">'
+            f'<strong style="color: {color};">{sender}:</strong> {msg["content"]}'
+            f'</div>'
+        )
+    
+    chat_history_rendered = "".join(chat_html_list) if chat_html_list else '<div style="color: #888888;">No messages yet. Say hello below!</div>'
+
+    html_content = f"""<!DOCTYPE html>
+<html>
+<head>
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Herald Web</title>
+    <style type="text/css">
+        body {{ background-color: #121212; color: #e0e0e0; font-family: Arial, sans-serif; margin: 0; padding: 10px; }}
+        h2 {{ color: #ffffff; margin: 0 0 10px 0; font-size: 18px; }}
+        .chat-container {{ background-color: #1e1e1e; border: 1px solid #333333; padding: 10px; margin-bottom: 10px; max-height: 350px; overflow-y: auto; }}
+        input[type="text"] {{ width: 70%; padding: 8px; background-color: #000000; color: #ffffff; border: 1px solid #444444; }}
+        input[type="submit"] {{ padding: 8px 14px; background-color: #0066cc; color: #ffffff; border: none; font-weight: bold; cursor: pointer; }}
+        .clear-link {{ font-size: 12px; color: #888888; text-decoration: none; margin-left: 10px; }}
+    </style>
+</head>
+<body>
+    <h2>Herald Web Interface</h2>
+    <div class="chat-container">
+        {chat_history_rendered}
+    </div>
+    <form method="POST" action="/">
+        <input type="text" name="message" autocomplete="off" autofocus="autofocus" />
+        <input type="submit" value="Send" />
+        <a href="/clear" class="clear-link">Clear Chat</a>
+    </form>
+</body>
+</html>"""
+    return html_content
+
+@app.route("/clear")
+def clear_chat():
+    session.pop("chat_history", None)
+    return '<script>window.location.href="/";</script><a href="/">Click here to return</a>'
+
 @app.route("/api/chat", methods=["POST"])
 def chat_api():
     data = request.get_json() or {}
@@ -235,36 +329,8 @@ def chat_api():
     if not messages:
         return jsonify({"response": "No messages provided."}), 400
     
-    api_key = GROQ_API_KEY or os.getenv("GROQ_API_KEY")
-    if not api_key:
-        return jsonify({"response": "groq api key is missing."}), 500
-
-    url = "https://api.groq.com/openai/v1/chat/completions"
-    headers = {
-        "Authorization": f"Bearer {api_key.strip()}",
-        "Content-Type": "application/json"
-    }
-
-    sanitized = []
-    for msg in messages:
-        role = "assistant" if msg.get("role") == "model" else msg.get("role", "user")
-        content = str(msg.get("content", "")).strip()
-        if content:
-            sanitized.append({"role": role, "content": content})
-
-    for model_name in FALLBACK_MODELS:
-        try:
-            r = requests.post(url, headers=headers, json={"model": model_name, "messages": sanitized}, timeout=10)
-            if r.status_code == 200:
-                resp_json = r.json()
-                if "choices" in resp_json and len(resp_json["choices"]) > 0:
-                    reply = clean_think_tags(resp_json["choices"][0]["message"]["content"])
-                    if reply:
-                        return jsonify({"response": reply})
-        except Exception:
-            continue
-
-    return jsonify({"response": "api error"}), 500
+    reply = generate_ai_response_sync(messages)
+    return jsonify({"response": reply})
 
 @bot.event
 async def on_ready():
@@ -464,11 +530,10 @@ async def ping(interaction: discord.Interaction):
 
 @bot.tree.command(name="updatelogs", description="view herald's latest patch notes.")
 async def updatelogs(interaction: discord.Interaction):
-    embed = discord.Embed(title="herald patch notes - v 2.27", color=discord.Color.blue())
-    embed.add_field(name="template fix", value="resolved jinja2 templatenotfound error on web endpoints.", inline=False)
-    embed.add_field(name="groq models", value="updated fallback matrix to high-limit open source endpoints.", inline=False)
-    embed.add_field(name="human persona", value="herald is a nonchalant, chill human texting online.", inline=False)
-    embed.add_field(name="cross-user memory", value="casually remembers information and passes messages between users when tagged.", inline=False)
+    embed = discord.Embed(title="herald patch notes - v 2.28", color=discord.Color.blue())
+    embed.add_field(name="universal web UI", value="interactive web chat rendered natively at herald-bot.onrender.com.", inline=False)
+    embed.add_field(name="legacy browser support", value="uses standard form POST without requiring modern client JS, compatible with older hardware.", inline=False)
+    embed.add_field(name="groq models", value="fallback matrix using llama-3.1-8b, llama-3.3-70b, qwen-2.5-32b, mixtral.", inline=False)
     await interaction.response.send_message(embed=embed)
 
 @bot.tree.command(name="feedback", description="submit feedback or report a bug.")
