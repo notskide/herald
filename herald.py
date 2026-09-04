@@ -7,7 +7,7 @@ from discord.ext import commands
 import aiohttp
 import requests
 import edge_tts
-from flask import Flask, request
+from flask import Flask, request, redirect, url_for
 from threading import Thread
 import traceback
 
@@ -44,10 +44,7 @@ def generate_ai_response_sync(messages):
             pass
     return "api error."
 
-@app.route('/')
-def home():
-    return "herald is alive!"
-
+@app.route('/', methods=['GET', 'POST'])
 @app.route('/chat', methods=['GET', 'POST'])
 def chat():
     user_ip = request.headers.get('X-Forwarded-For', request.remote_addr)
@@ -66,10 +63,36 @@ def chat():
     chat_history = ""
     for m in web_memory.get(user_ip, []):
         sender = "you" if m["role"] == "user" else "herald"
-        color = "#000000" if m["role"] == "user" else "#555555"
-        chat_history += f"<p style='color:{color}; font-size: 14px;'><b>{sender}:</b> {m['content']}</p>"
+        color = "#111111" if m["role"] == "user" else "#555555"
+        chat_history += f"<div style='margin-bottom: 8px;'><b style='color:{color};'>{sender}:</b> {m['content']}</div>"
 
-    html = f"""<!DOCTYPE html><html><head><title>herald</title><meta name="viewport" content="width=device-width, initial-scale=1"><style>body {{ font-family: Arial, sans-serif; background-color: #ffffff; color: #000000; padding: 5px; margin: 0; }} .c {{ max-width: 500px; margin: 0 auto; }} input[type="text"] {{ width: 70%; padding: 4px; font-size: 14px; border: 1px solid #ccc; }} input[type="submit"] {{ width: 20%; padding: 4px; font-size: 14px; border: 1px solid #333; background: #eee; color: #000; }} hr {{ border: 0; border-top: 1px solid #ccc; margin: 10px 0; }}</style></head><body><div class="c"><h3 style="margin: 5px 0;">herald chat</h3><hr>{chat_history}<hr><form method="post" action="/chat"><input type="text" name="message" autocomplete="off"><input type="submit" value="send"></form></div></body></html>"""
+    html = f"""<!DOCTYPE html>
+<html>
+<head>
+    <title>herald web portal</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+        body {{ font-family: Arial, sans-serif; background-color: #f4f4f9; color: #222; padding: 10px; margin: 0; }}
+        .chat-container {{ max-width: 600px; margin: 0 auto; background: #fff; padding: 15px; border-radius: 6px; border: 1px solid #ccc; }}
+        .history-box {{ min-height: 200px; max-height: 450px; overflow-y: auto; font-size: 14px; border-bottom: 1px solid #eee; padding-bottom: 10px; margin-bottom: 10px; }}
+        input[type="text"] {{ width: 72%; padding: 8px; font-size: 14px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; }}
+        input[type="submit"] {{ width: 25%; padding: 8px; font-size: 14px; border: 1px solid #333; background: #222; color: #fff; border-radius: 4px; cursor: pointer; box-sizing: border-box; }}
+        h3 {{ margin-top: 0; color: #333; font-size: 18px; border-bottom: 1px solid #eee; padding-bottom: 5px; }}
+    </style>
+</head>
+<body>
+    <div class="chat-container">
+        <h3>herald</h3>
+        <div class="history-box">
+            {chat_history if chat_history else "<p style='color:#888;'>type something below to chat with herald.</p>"}
+        </div>
+        <form method="post" action="/">
+            <input type="text" name="message" autocomplete="off" autofocus>
+            <input type="submit" value="send">
+        </form>
+    </div>
+</body>
+</html>"""
     return html
 
 def run():
@@ -473,7 +496,7 @@ async def updatelogs(interaction: discord.Interaction):
     embed.add_field(name="groq integration", value="switched to groq api for faster processing and higher limits.", inline=False)
     embed.add_field(name="human persona", value="herald is now a nonchalant, chill human who doesn't try too hard to be cool.", inline=False)
     embed.add_field(name="ping fix", value="herald now completely ignores @everyone and @here pings.", inline=False)
-    embed.add_field(name="blackberry portal", value="added a retro-compatible web chat interface at /chat.", inline=False)
+    embed.add_field(name="universal web portal", value="web chat is now accessible directly on the root domain (/).", inline=False)
     await interaction.response.send_message(embed=embed)
 
 @bot.tree.command(name="feedback", description="submit feedback or report a bug.")
