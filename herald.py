@@ -189,9 +189,13 @@ def generate_ai_response_sync(messages):
     sanitized = []
     for msg in messages:
         role = "assistant" if msg.get("role") == "model" else msg.get("role", "user")
-        content = str(msg.get("content", "")).strip()
-        if content:
+        content = msg.get("content", "")
+        if isinstance(content, list):
             sanitized.append({"role": role, "content": content})
+        else:
+            content_str = str(content).strip()
+            if content_str:
+                sanitized.append({"role": role, "content": content_str})
 
     for model_name in FALLBACK_MODELS:
         try:
@@ -223,9 +227,13 @@ async def generate_ai_response(messages):
         role = msg.get("role", "user")
         if role == "model":
             role = "assistant"
-        content = str(msg.get("content", "")).strip()
-        if content:
+        content = msg.get("content", "")
+        if isinstance(content, list):
             sanitized_messages.append({"role": role, "content": content})
+        else:
+            content_str = str(content).strip()
+            if content_str:
+                sanitized_messages.append({"role": role, "content": content_str})
 
     errors = []
     
@@ -334,7 +342,7 @@ async def on_ready():
 
 @bot.event
 async def on_message(message):
-    if message.author.bot:
+    if message.author.id == bot.user.id:
         return
         
     if "@everyone" in message.content or "@here" in message.content:
@@ -417,10 +425,13 @@ async def on_message(message):
     is_about_herald = "herald" in message.content.lower()
     is_dm = isinstance(message.channel, discord.DMChannel)
 
+    if message.author.bot and not (is_mentioned or is_reply_to_herald):
+        return
+
     if is_reply_to_herald or is_mentioned or is_about_herald or is_dm:
         if message.mentions and message.guild:
             for target in message.mentions:
-                if target.id != bot.user.id and target in message.guild.members:
+                if target.id != bot.user.id and target in message.guild.members and not target.bot:
                     target_id_str = str(target.id)
                     if target_id_str not in pending_deliveries:
                         pending_deliveries[target_id_str] = []
@@ -484,12 +495,25 @@ async def on_message(message):
                     formatted_history.append({"role": role, "content": content.strip()})
             
             user_msg_content = f"{message.author.name}: {message.content}"
-            formatted_history.append({"role": "user", "content": user_msg_content})
+            has_image = False
+            content_payload = [{"type": "text", "text": user_msg_content}]
+            
+            if message.attachments:
+                for att in message.attachments:
+                    if att.content_type and att.content_type.startswith("image/"):
+                        content_payload.append({"type": "image_url", "image_url": {"url": att.url}})
+                        has_image = True
+            
+            if has_image:
+                formatted_history.append({"role": "user", "content": content_payload})
+                clean_user_mem = {"role": "user", "content": user_msg_content + " [image attached]"}
+            else:
+                formatted_history.append({"role": "user", "content": user_msg_content})
+                clean_user_mem = {"role": "user", "content": user_msg_content}
             
             reply_text = await generate_ai_response(formatted_history)
             
             if not reply_text.startswith("api error details:"):
-                clean_user_mem = {"role": "user", "content": user_msg_content}
                 clean_bot_mem = {"role": "assistant", "content": reply_text}
                 
                 updated_memory_history = []
