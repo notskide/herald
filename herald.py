@@ -75,6 +75,41 @@ def get_groq_api_keys():
     return keys
 
 
+
+async def notify_superuser_api_error(error_title, error_details, report_context=None, request_summary=None):
+    """DM the first configured superuser who can receive an error report."""
+    report_context = report_context or {}
+    user_message = str(report_context.get("message", "(not available)"))
+    if len(user_message) > 850:
+        user_message = user_message[:850] + "... [truncated]"
+
+    lines = [
+        "🚨 **Herald API error report**",
+        f"**Error:** {str(error_title)[:300]}",
+        f"**Details / likely cause:** {str(error_details)[:550]}",
+        f"**User:** {report_context.get('author_name', 'Unknown')} ({report_context.get('author_id', 'unknown')})",
+        f"**Server / channel:** {report_context.get('guild_name', 'DM or unknown')} / {report_context.get('channel_name', 'unknown')}",
+        f"**Message ID:** {report_context.get('message_id', 'unknown')}",
+        "**User's message/request:**",
+        user_message or "(empty message)",
+    ]
+    if request_summary:
+        lines.extend(["**Request sent to Groq:**", str(request_summary)[:250]])
+    report = "\n".join(lines)
+
+    for superuser_id in SUPER_USERS:
+        try:
+            superuser = bot.get_user(superuser_id) or await bot.fetch_user(superuser_id)
+            if superuser:
+                # Keep the report below Discord's message limit.
+                await superuser.send(report[:1950])
+                print(f"[Herald] API error report delivered to superuser ID {superuser_id}.")
+                return True
+        except Exception as exc:
+            print(f"[Herald] Could not DM superuser ID {superuser_id}: {type(exc).__name__}: {exc}")
+    print("[Herald] ERROR: Could not deliver the API error report to any configured superuser.")
+    return False
+
 def load_json(filename):
     if not os.path.exists(filename):
         return {}
@@ -454,7 +489,7 @@ def generate_ai_response_sync(messages):
     return "api error"
 
 
-async def generate_ai_response(messages, user_id=None):
+async def generate_ai_response(messages, user_id=None, report_context=None):
     api_keys = get_groq_api_keys()
     if not api_keys:
         print("[Groq] ERROR: GROQ_API_KEY is missing or contains no valid keys.")
@@ -496,13 +531,32 @@ async def generate_ai_response(messages, user_id=None):
                                 f"[Groq] HTTP {response.status} for {model_name} "
                                 f"(key {key_index}/{len(api_keys)}): {error_body[:1000]}"
                             )
+                            image_parts = sum(
+                                1
+                                for item in sanitized_messages
+                                if isinstance(item.get("content"), list)
+                                for part in item["content"]
+                                if part.get("type") == "image_url"
+                            )
+                            request_summary = (
+                                f"model={model_name}; messages={len(sanitized_messages)}; "
+                                f"approx_chars={sum(len(str(item.get('content', ''))) for item in sanitized_messages)}; "
+                                f"image_parts={image_parts}"
+                            )
+                            cause = error_body[:1200] or "The API returned an empty error body."
                             if response.status == 413:
-                                print(
-                                    "[Groq] HTTP 413 means the request payload is too large. "
-                                    "Conversation history is capped before sending; check for oversized "
-                                    "multimodal content or an upstream/proxy response."
-                                )
-                                return "that message is too large for me to process—try sending less text or fewer images.", False
+                                cause = "Request body too large (HTTP 413). Reduce message/history size or image payloads. API response: " + cause
+                            elif response.status == 429:
+                                cause = "Rate limit or quota exceeded (HTTP 429). Check the API organization's limits and retry timing. API response: " + cause
+                            else:
+                                cause = f"Groq rejected the request with HTTP {response.status}. API response: " + cause
+                            await notify_superuser_api_error(
+                                f"Groq HTTP {response.status}", cause, report_context, request_summary
+                            )
+                            # 413/429 are clear failures; don't retry the same request with every key.
+                            if response.status in (413, 429):
+                                return f"Groq API error (HTTP {response.status}): {cause[:500]}", False
+                            return f"Groq API error (HTTP {response.status}): {cause[:500]}", False
                 except asyncio.TimeoutError:
                     print(f"[Groq] Timeout while calling {model_name} using key {key_index}.")
                 except aiohttp.ClientError as exc:
@@ -817,7 +871,23 @@ async def on_message(message):
             clean_user_mem = {"role": "user", "content": user_msg_content}
 
         print(f"[Herald] Calling Groq for user ID {user_id}.")
-        reply_text, is_error = await generate_ai_response(formatted_history, user_id=message.author.id)
+        report_context = {
+            "message": message.content or "(message had no text; see attachment metadata if present)",
+            "author_name": str(message.author),
+            "author_id": message.author.id,
+            "guild_name": getattr(message.guild, "name", "Direct Message"),
+            "channel_name": getattr(message.channel, "name", str(message.channel)),
+            "message_id": message.id,
+        }
+        if message.attachments:
+            attachment_info = ", ".join(
+                f"{attachment.filename} ({attachment.content_type or 'unknown type'})"
+                for attachment in message.attachments[:5]
+            )
+            report_context["message"] += f"\n[Attachments: {attachment_info}]"
+        reply_text, is_error = await generate_ai_response(
+            formatted_history, user_id=message.author.id, report_context=report_context
+        )
         print(f"[Herald] Groq function returned is_error={is_error}.")
 
         if is_error:
