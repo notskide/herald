@@ -298,20 +298,107 @@ class SettingsView(discord.ui.View):
         )
 
 
+MAX_GROQ_INPUT_CHARS = 24000
+MAX_GROQ_MESSAGES = 24
+MAX_GROQ_MESSAGE_CHARS = 6000
+MAX_GROQ_IMAGES_PER_MESSAGE = 3
+
+
 def sanitize_messages(messages):
-    sanitized = []
+    normalized = []
     for msg in messages:
+        if not isinstance(msg, dict):
+            continue
+
         role = msg.get("role", "user")
         if role == "model":
             role = "assistant"
+
         content = msg.get("content", "")
         if isinstance(content, list):
-            sanitized.append({"role": role, "content": content})
+            cleaned_parts = []
+            image_count = 0
+            for part in content:
+                if not isinstance(part, dict):
+                    continue
+                part_type = part.get("type")
+                if part_type == "text":
+                    text_value = str(part.get("text", "")).strip()
+                    if text_value:
+                        cleaned_parts.append({
+                            "type": "text",
+                            "text": text_value[:MAX_GROQ_MESSAGE_CHARS],
+                        })
+                elif part_type == "image_url" and image_count < MAX_GROQ_IMAGES_PER_MESSAGE:
+                    image_url = part.get("image_url")
+                    if isinstance(image_url, dict) and image_url.get("url"):
+                        cleaned_parts.append({
+                            "type": "image_url",
+                            "image_url": {"url": image_url["url"]},
+                        })
+                        image_count += 1
+            if cleaned_parts:
+                normalized.append({"role": role, "content": cleaned_parts})
         else:
             content_str = str(content).strip()
             if content_str:
-                sanitized.append({"role": role, "content": content_str})
-    return sanitized
+                normalized.append({
+                    "role": role,
+                    "content": content_str[:MAX_GROQ_MESSAGE_CHARS],
+                })
+
+    if not normalized:
+        return []
+
+    system_messages = [msg for msg in normalized if msg["role"] == "system"]
+    other_messages = [msg for msg in normalized if msg["role"] != "system"]
+    selected = system_messages[:1] + other_messages[-(MAX_GROQ_MESSAGES - min(1, len(system_messages))):]
+
+    def content_size(content):
+        if isinstance(content, str):
+            return len(content)
+        size = 0
+        for part in content:
+            if part.get("type") == "text":
+                size += len(part.get("text", ""))
+            elif part.get("type") == "image_url":
+                size += len(part.get("image_url", {}).get("url", ""))
+        return size
+
+    total_chars = sum(content_size(msg["content"]) for msg in selected)
+    while len(selected) > 1 and total_chars > MAX_GROQ_INPUT_CHARS:
+        remove_index = 1 if selected[0].get("role") == "system" else 0
+        removed = selected.pop(remove_index)
+        total_chars -= content_size(removed["content"])
+
+    if selected and total_chars > MAX_GROQ_INPUT_CHARS:
+        system_message = selected[0]
+        content = system_message["content"]
+        if isinstance(content, str):
+            system_message["content"] = content[:MAX_GROQ_INPUT_CHARS]
+        else:
+            remaining = MAX_GROQ_INPUT_CHARS
+            trimmed_parts = []
+            for part in content:
+                if part.get("type") == "text" and remaining > 0:
+                    text_value = part.get("text", "")[:remaining]
+                    if text_value:
+                        trimmed_parts.append({"type": "text", "text": text_value})
+                        remaining -= len(text_value)
+                elif part.get("type") == "image_url" and remaining > 0:
+                    url = part.get("image_url", {}).get("url", "")
+                    if len(url) <= remaining:
+                        trimmed_parts.append({"type": "image_url", "image_url": {"url": url}})
+                        remaining -= len(url)
+            system_message["content"] = trimmed_parts
+
+    if len(normalized) != len(selected) or total_chars > MAX_GROQ_INPUT_CHARS:
+        print(
+            f"[Groq] Trimmed conversation history to {len(selected)} messages "
+            f"and approximately {min(total_chars, MAX_GROQ_INPUT_CHARS)} characters."
+        )
+
+    return selected
 
 
 def generate_ai_response_sync(messages):
@@ -351,6 +438,12 @@ def generate_ai_response_sync(messages):
                         f"[Groq sync] HTTP {response.status_code} for {model_name} "
                         f"(key {key_index}/{len(api_keys)}): {response.text[:1000]}"
                     )
+                    if response.status_code == 413:
+                        print(
+                            "[Groq sync] HTTP 413 means the request payload is too large. "
+                            "Conversation history is capped before sending."
+                        )
+                        return "request payload too large"
             except requests.RequestException as exc:
                 print(f"[Groq sync] Network error for {model_name} using key {key_index}: {exc}")
             except (ValueError, KeyError, TypeError):
@@ -403,6 +496,13 @@ async def generate_ai_response(messages, user_id=None):
                                 f"[Groq] HTTP {response.status} for {model_name} "
                                 f"(key {key_index}/{len(api_keys)}): {error_body[:1000]}"
                             )
+                            if response.status == 413:
+                                print(
+                                    "[Groq] HTTP 413 means the request payload is too large. "
+                                    "Conversation history is capped before sending; check for oversized "
+                                    "multimodal content or an upstream/proxy response."
+                                )
+                                return "that message is too large for me to process—try sending less text or fewer images.", False
                 except asyncio.TimeoutError:
                     print(f"[Groq] Timeout while calling {model_name} using key {key_index}.")
                 except aiohttp.ClientError as exc:
@@ -779,7 +879,7 @@ async def ping(interaction: discord.Interaction):
 async def updatelogs(interaction: discord.Interaction):
     embed = discord.Embed(
         title="herald · patch notes",
-        description="v2.5.4 — groq key rotation & recovery",
+        description="v2.5.5 — request size protection",
         color=discord.Color.from_rgb(32, 32, 32),
     )
     embed.add_field(
@@ -795,6 +895,11 @@ async def updatelogs(interaction: discord.Interaction):
     embed.add_field(
         name="🔑 multiple Groq API keys",
         value="GROQ_API_KEY now accepts comma-separated keys and automatically tries the next key when a request fails.",
+        inline=False,
+    )
+    embed.add_field(
+        name="📦 oversized request protection",
+        value="caps conversation history and message sizes before sending requests to Groq, limits images per message, and handles HTTP 413 without pointlessly retrying every API key.",
         inline=False,
     )
     embed.add_field(
