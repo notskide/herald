@@ -60,7 +60,12 @@ MEMORY_CHANNEL_ID = 1537372357075669112
 SKIDE_USER_ID = 1380365019153432596
 SUPER_USERS = [1380365019153432596, 1516638561183727648, 1431879700644499549]
 
-FALLBACK_MODELS = ["qwen/qwen3.8-27b"]
+FALLBACK_MODELS = [
+    "qwen/qwen3.8-27b",
+    "openai/gpt-oss-20b",
+    "openai/gpt-oss-120b",
+]
+MAX_COMPLETION_TOKENS = 512
 
 
 def get_groq_api_keys():
@@ -456,7 +461,11 @@ def generate_ai_response_sync(messages):
                 response = requests.post(
                     url,
                     headers=headers,
-                    json={"model": model_name, "messages": sanitized},
+                    json={
+                        "model": model_name,
+                        "messages": sanitized,
+                        "max_completion_tokens": MAX_COMPLETION_TOKENS,
+                    },
                     timeout=30,
                 )
                 if response.status_code == 200:
@@ -506,7 +515,11 @@ async def generate_ai_response(messages, user_id=None, report_context=None):
                     "Authorization": f"Bearer {api_key}",
                     "Content-Type": "application/json",
                 }
-                payload = {"model": model_name, "messages": sanitized_messages}
+                payload = {
+                    "model": model_name,
+                    "messages": sanitized_messages,
+                    "max_completion_tokens": MAX_COMPLETION_TOKENS,
+                }
                 try:
                     print(f"[Groq] Sending request using model: {model_name} (key {key_index}/{len(api_keys)})")
                     async with session.post(
@@ -554,9 +567,14 @@ async def generate_ai_response(messages, user_id=None, report_context=None):
                             await notify_superuser_api_error(
                                 f"Groq HTTP {response.status}", cause, report_context, request_summary
                             )
-                            # 413/429 are clear failures; don't retry the same request with every key.
-                            if response.status in (413, 429):
+                            # A 413 will not be fixed by switching models. For 429, try
+                            # another model because OTPM limits can differ by model; rotating
+                            # keys from the same organization will not raise its organization cap.
+                            if response.status == 413:
                                 return f"Groq API error (HTTP {response.status}): {cause[:500]}", False
+                            if response.status == 429:
+                                last_error = f"Groq HTTP 429 on {model_name}: {cause[:900]}"
+                                break
                             return f"Groq API error (HTTP {response.status}): {cause[:500]}", False
                 except asyncio.TimeoutError as exc:
                     last_error = f"Request timed out after 30 seconds while calling model {model_name}."
@@ -892,9 +910,11 @@ async def on_message(message):
                 for attachment in message.attachments[:5]
             )
             report_context["message"] += f"\n[Attachments: {attachment_info}]"
-        reply_text, is_error = await generate_ai_response(
-            formatted_history, user_id=message.author.id, report_context=report_context
-        )
+        # Keep Discord's typing indicator active while Groq is thinking / trying fallback models.
+        async with message.channel.typing():
+            reply_text, is_error = await generate_ai_response(
+                formatted_history, user_id=message.author.id, report_context=report_context
+            )
         print(f"[Herald] Groq function returned is_error={is_error}.")
 
         if is_error:
@@ -976,7 +996,7 @@ async def ping(interaction: discord.Interaction):
 async def updatelogs(interaction: discord.Interaction):
     embed = discord.Embed(
         title="herald · patch notes",
-        description="v2.5.5 — request size protection",
+        description="v2.5.6 — model fallback and typing indicator",
         color=discord.Color.from_rgb(32, 32, 32),
     )
     embed.add_field(
@@ -1011,7 +1031,7 @@ async def updatelogs(interaction: discord.Interaction):
     )
     embed.add_field(
         name="⚙️ model",
-        value="continues using qwen/qwen3.8-27b through the Groq API.",
+        value="tries qwen/qwen3.8-27b first, then OpenAI GPT-OSS 20B and 120B on Groq if needed. Caps requested output at 512 tokens to avoid the Qwen 1,000-output-tokens-per-minute error.",
         inline=False,
     )
     embed.set_footer(text="herald")
