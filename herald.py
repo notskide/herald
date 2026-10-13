@@ -501,98 +501,111 @@ def generate_ai_response_sync(messages):
 async def generate_ai_response(messages, user_id=None, report_context=None):
     api_keys = get_groq_api_keys()
     if not api_keys:
-        print("[Groq] ERROR: GROQ_API_KEY is missing or contains no valid keys.")
-        return "brb wifi acting up", False
+        return "i couldn't reach groq: `GROQ_API_KEY` is missing in Render environment variables.", False
 
     url = "https://api.groq.com/openai/v1/chat/completions"
     sanitized_messages = sanitize_messages(messages)
+    if not sanitized_messages:
+        return "i couldn't send that to groq because the conversation was empty after cleanup.", False
 
     last_error = None
+    # Avoid retrying many keys for the same model: keys from one org share limits,
+    # and repeated attempts can make the typing indicator last much too long.
     async with aiohttp.ClientSession() as session:
         for model_name in FALLBACK_MODELS:
+            model_payload = {
+                "model": model_name,
+                "messages": sanitized_messages,
+                "max_completion_tokens": MAX_COMPLETION_TOKENS,
+            }
+            # Keep reasoning tokens from consuming the whole small output budget.
+            if model_name == "qwen/qwen3.8-27b":
+                model_payload["reasoning_effort"] = "none"
+            elif model_name.startswith("openai/gpt-oss-"):
+                model_payload["reasoning_effort"] = "low"
+                model_payload["reasoning_format"] = "hidden"
+
             for key_index, api_key in enumerate(api_keys, start=1):
                 headers = {
                     "Authorization": f"Bearer {api_key}",
                     "Content-Type": "application/json",
                 }
-                payload = {
-                    "model": model_name,
-                    "messages": sanitized_messages,
-                    "max_completion_tokens": MAX_COMPLETION_TOKENS,
-                }
                 try:
-                    print(f"[Groq] Sending request using model: {model_name} (key {key_index}/{len(api_keys)})")
+                    print(f"[Groq] Trying {model_name} (key {key_index}/{len(api_keys)}).")
                     async with session.post(
                         url,
                         headers=headers,
-                        json=payload,
-                        timeout=aiohttp.ClientTimeout(total=30),
+                        json=model_payload,
+                        timeout=aiohttp.ClientTimeout(total=18, connect=8),
                     ) as response:
+                        body = await response.text()
                         if response.status == 200:
-                            data = await response.json()
+                            try:
+                                data = json.loads(body)
+                            except json.JSONDecodeError:
+                                last_error = f"{model_name} returned invalid JSON."
+                                print(f"[Groq] {last_error}")
+                                break
                             choices = data.get("choices", [])
                             if choices:
-                                raw_reply = choices[0].get("message", {}).get("content")
+                                choice = choices[0]
+                                message_data = choice.get("message", {}) or {}
+                                raw_reply = message_data.get("content")
                                 cleaned_reply = clean_think_tags(raw_reply)
                                 if cleaned_reply:
-                                    cooling_down_users.clear()
-                                    print(f"[Groq] Request successful with key {key_index}.")
+                                    cooling_down_users.discard(user_id)
+                                    print(f"[Groq] Success using {model_name}.")
                                     return sanitize_reply(cleaned_reply), False
-                            print("[Groq] Successful HTTP response, but no usable reply.")
-                        else:
-                            error_body = await response.text()
-                            print(
-                                f"[Groq] HTTP {response.status} for {model_name} "
-                                f"(key {key_index}/{len(api_keys)}): {error_body[:1000]}"
-                            )
-                            image_parts = sum(
-                                1
-                                for item in sanitized_messages
-                                if isinstance(item.get("content"), list)
-                                for part in item["content"]
-                                if part.get("type") == "image_url"
-                            )
-                            request_summary = (
-                                f"model={model_name}; messages={len(sanitized_messages)}; "
-                                f"approx_chars={sum(len(str(item.get('content', ''))) for item in sanitized_messages)}; "
-                                f"image_parts={image_parts}"
-                            )
-                            cause = error_body[:1200] or "The API returned an empty error body."
-                            if response.status == 413:
-                                cause = "Request body too large (HTTP 413). Reduce message/history size or image payloads. API response: " + cause
-                            elif response.status == 429:
-                                cause = "Rate limit or quota exceeded (HTTP 429). Check the API organization's limits and retry timing. API response: " + cause
+                                finish_reason = choice.get("finish_reason", "unknown")
+                                last_error = (
+                                    f"{model_name} returned an empty message (finish_reason={finish_reason}). "
+                                    "Trying the next model."
+                                )
                             else:
-                                cause = f"Groq rejected the request with HTTP {response.status}. API response: " + cause
-                            await notify_superuser_api_error(
-                                f"Groq HTTP {response.status}", cause, report_context, request_summary
-                            )
-                            # A 413 will not be fixed by switching models. For 429, try
-                            # another model because OTPM limits can differ by model; rotating
-                            # keys from the same organization will not raise its organization cap.
-                            if response.status == 413:
-                                return f"Groq API error (HTTP {response.status}): {cause[:500]}", False
-                            if response.status == 429:
-                                last_error = f"Groq HTTP 429 on {model_name}: {cause[:900]}"
-                                break
-                            return f"Groq API error (HTTP {response.status}): {cause[:500]}", False
-                except asyncio.TimeoutError as exc:
-                    last_error = f"Request timed out after 30 seconds while calling model {model_name}."
-                    print(f"[Groq] {last_error}")
-                except aiohttp.ClientError as exc:
-                    last_error = f"Network/connection error ({type(exc).__name__}): {str(exc) or 'no additional details'}"
-                    print(f"[Groq] Network error for {model_name} using key {key_index}: {exc}")
-                except Exception as exc:
-                    last_error = f"Unexpected error ({type(exc).__name__}): {str(exc) or 'no additional details'}"
-                    traceback.print_exc()
+                                last_error = f"{model_name} returned no choices."
+                            print(f"[Groq] {last_error}")
+                            break
 
+                        error_text = body[:1000] or "empty error response"
+                        last_error = f"HTTP {response.status} from {model_name}: {error_text}"
+                        print(f"[Groq] {last_error}")
+                        if response.status == 413:
+                            # Same input payload will not improve by changing models.
+                            cause = "Request payload too large (HTTP 413). " + error_text
+                            if report_context:
+                                await notify_superuser_api_error("Groq HTTP 413", cause, report_context)
+                            return f"i couldn't send that request to groq. **Error:** {cause[:650]}", False
+                        # Continue to the next key/model on quota, model, or parameter errors.
+                        if response.status in (400, 401, 403, 404, 429) or response.status >= 500:
+                            continue
+                        break
+                except asyncio.TimeoutError:
+                    last_error = f"Timed out after 18 seconds while calling {model_name}."
+                    print(f"[Groq] {last_error}")
+                    break
+                except aiohttp.ClientError as exc:
+                    last_error = f"Network error for {model_name}: {type(exc).__name__}: {exc}"
+                    print(f"[Groq] {last_error}")
+                    break
+                except Exception as exc:
+                    last_error = f"Unexpected error for {model_name}: {type(exc).__name__}: {exc}"
+                    print(f"[Groq] {last_error}")
+                    traceback.print_exc()
+                    break
+
+    reason = last_error or "All configured Groq models failed without returning a reply."
     if user_id is not None:
         cooling_down_users.add(user_id)
-
-    reason = last_error or "No response was received from the Groq API. Check the bot logs and API configuration."
+    # Report only once, after all model attempts, so DMs don't stall each fallback attempt.
     if report_context:
-        await notify_superuser_api_error("Groq request failed", reason, report_context)
-    return f"i couldn't complete that request. **Error:** {reason[:700]}", False
+        try:
+            await asyncio.wait_for(
+                notify_superuser_api_error("Groq request failed after model fallbacks", reason, report_context),
+                timeout=4,
+            )
+        except Exception as exc:
+            print(f"[Groq] Could not finish superuser report quickly: {type(exc).__name__}: {exc}")
+    return f"i couldn't get a response from groq after trying the available models. **Last error:** {reason[:650]}", False
 
 
 @app.route("/", methods=["GET", "POST"])
