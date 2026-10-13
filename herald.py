@@ -1,4 +1,5 @@
 import os
+import asyncio
 import json
 import re
 import html
@@ -49,7 +50,7 @@ class HeraldBot(commands.Bot):
 bot = HeraldBot()
 
 DISCORD_BOT_TOKEN = os.getenv("DISCORD_BOT_TOKEN") or os.getenv("DISCORD_TOKEN")
-GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
 
 SETTINGS_FILE = "guild_settings.json"
 BANNED_USERS_FILE = "banned_users.json"
@@ -60,6 +61,18 @@ SKIDE_USER_ID = 1380365019153432596
 SUPER_USERS = [1380365019153432596, 1516638561183727648, 1431879700644499549]
 
 FALLBACK_MODELS = ["qwen/qwen3.8-27b"]
+
+
+def get_groq_api_keys():
+    raw_keys = os.getenv("GROQ_API_KEY") or GROQ_API_KEY or ""
+    keys = []
+    for item in raw_keys.split(","):
+        key = item.strip().strip("\"").strip("'").strip()
+        if len(key) >= 2 and key.startswith("[") and key.endswith("]"):
+            key = key[1:-1].strip()
+        if key and key not in keys:
+            keys.append(key)
+    return keys
 
 
 def load_json(filename):
@@ -302,98 +315,100 @@ def sanitize_messages(messages):
 
 
 def generate_ai_response_sync(messages):
-    api_key = GROQ_API_KEY or os.getenv("GROQ_API_KEY")
-    if not api_key:
-        print("[Groq sync] ERROR: GROQ_API_KEY is missing.")
+    api_keys = get_groq_api_keys()
+    if not api_keys:
+        print("[Groq sync] ERROR: GROQ_API_KEY is missing or contains no valid keys.")
         return "groq api key is missing."
 
     url = "https://api.groq.com/openai/v1/chat/completions"
-    headers = {
-        "Authorization": f"Bearer {api_key.strip()}",
-        "Content-Type": "application/json",
-    }
     sanitized = sanitize_messages(messages)
 
     for model_name in FALLBACK_MODELS:
-        try:
-            print(f"[Groq sync] Sending request using model: {model_name}")
-            response = requests.post(
-                url,
-                headers=headers,
-                json={"model": model_name, "messages": sanitized},
-                timeout=30,
-            )
-            if response.status_code == 200:
-                data = response.json()
-                choices = data.get("choices", [])
-                if choices:
-                    reply = clean_think_tags(choices[0].get("message", {}).get("content"))
-                    if reply:
-                        print("[Groq sync] Request successful.")
-                        return sanitize_reply(reply)
-                print("[Groq sync] Successful HTTP response, but no usable reply.")
-            else:
-                print(
-                    f"[Groq sync] HTTP {response.status_code} for {model_name}: "
-                    f"{response.text[:1000]}"
+        for key_index, api_key in enumerate(api_keys, start=1):
+            headers = {
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+            }
+            try:
+                print(f"[Groq sync] Sending request using model: {model_name} (key {key_index}/{len(api_keys)})")
+                response = requests.post(
+                    url,
+                    headers=headers,
+                    json={"model": model_name, "messages": sanitized},
+                    timeout=30,
                 )
-        except requests.RequestException as exc:
-            print(f"[Groq sync] Network error for {model_name}: {exc}")
-        except (ValueError, KeyError, TypeError):
-            traceback.print_exc()
-        except Exception:
-            traceback.print_exc()
+                if response.status_code == 200:
+                    data = response.json()
+                    choices = data.get("choices", [])
+                    if choices:
+                        reply = clean_think_tags(choices[0].get("message", {}).get("content"))
+                        if reply:
+                            print(f"[Groq sync] Request successful with key {key_index}.")
+                            return sanitize_reply(reply)
+                    print("[Groq sync] Successful HTTP response, but no usable reply.")
+                else:
+                    print(
+                        f"[Groq sync] HTTP {response.status_code} for {model_name} "
+                        f"(key {key_index}/{len(api_keys)}): {response.text[:1000]}"
+                    )
+            except requests.RequestException as exc:
+                print(f"[Groq sync] Network error for {model_name} using key {key_index}: {exc}")
+            except (ValueError, KeyError, TypeError):
+                traceback.print_exc()
+            except Exception:
+                traceback.print_exc()
 
     return "api error"
 
 
 async def generate_ai_response(messages, user_id=None):
-    api_key = GROQ_API_KEY or os.getenv("GROQ_API_KEY")
-    if not api_key:
-        print("[Groq] ERROR: GROQ_API_KEY is missing.")
+    api_keys = get_groq_api_keys()
+    if not api_keys:
+        print("[Groq] ERROR: GROQ_API_KEY is missing or contains no valid keys.")
         return "brb wifi acting up", False
 
     url = "https://api.groq.com/openai/v1/chat/completions"
-    headers = {
-        "Authorization": f"Bearer {api_key.strip()}",
-        "Content-Type": "application/json",
-    }
     sanitized_messages = sanitize_messages(messages)
 
     async with aiohttp.ClientSession() as session:
         for model_name in FALLBACK_MODELS:
-            payload = {"model": model_name, "messages": sanitized_messages}
-            try:
-                print(f"[Groq] Sending request using model: {model_name}")
-                async with session.post(
-                    url,
-                    headers=headers,
-                    json=payload,
-                    timeout=aiohttp.ClientTimeout(total=30),
-                ) as response:
-                    if response.status == 200:
-                        data = await response.json()
-                        choices = data.get("choices", [])
-                        if choices:
-                            raw_reply = choices[0].get("message", {}).get("content")
-                            cleaned_reply = clean_think_tags(raw_reply)
-                            if cleaned_reply:
-                                cooling_down_users.clear()
-                                print("[Groq] Request successful.")
-                                return sanitize_reply(cleaned_reply), False
-                        print("[Groq] Successful HTTP response, but no usable reply.")
-                    else:
-                        error_body = await response.text()
-                        print(
-                            f"[Groq] HTTP {response.status} for {model_name}: "
-                            f"{error_body[:1000]}"
-                        )
-            except asyncio.TimeoutError:
-                print(f"[Groq] Timeout while calling {model_name}.")
-            except aiohttp.ClientError as exc:
-                print(f"[Groq] Network error for {model_name}: {exc}")
-            except Exception:
-                traceback.print_exc()
+            for key_index, api_key in enumerate(api_keys, start=1):
+                headers = {
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json",
+                }
+                payload = {"model": model_name, "messages": sanitized_messages}
+                try:
+                    print(f"[Groq] Sending request using model: {model_name} (key {key_index}/{len(api_keys)})")
+                    async with session.post(
+                        url,
+                        headers=headers,
+                        json=payload,
+                        timeout=aiohttp.ClientTimeout(total=30),
+                    ) as response:
+                        if response.status == 200:
+                            data = await response.json()
+                            choices = data.get("choices", [])
+                            if choices:
+                                raw_reply = choices[0].get("message", {}).get("content")
+                                cleaned_reply = clean_think_tags(raw_reply)
+                                if cleaned_reply:
+                                    cooling_down_users.clear()
+                                    print(f"[Groq] Request successful with key {key_index}.")
+                                    return sanitize_reply(cleaned_reply), False
+                            print("[Groq] Successful HTTP response, but no usable reply.")
+                        else:
+                            error_body = await response.text()
+                            print(
+                                f"[Groq] HTTP {response.status} for {model_name} "
+                                f"(key {key_index}/{len(api_keys)}): {error_body[:1000]}"
+                            )
+                except asyncio.TimeoutError:
+                    print(f"[Groq] Timeout while calling {model_name} using key {key_index}.")
+                except aiohttp.ClientError as exc:
+                    print(f"[Groq] Network error for {model_name} using key {key_index}: {exc}")
+                except Exception:
+                    traceback.print_exc()
 
     if user_id is not None:
         cooling_down_users.add(user_id)
@@ -764,7 +779,7 @@ async def ping(interaction: discord.Interaction):
 async def updatelogs(interaction: discord.Interaction):
     embed = discord.Embed(
         title="herald · patch notes",
-        description="v2.5.3 — groq recovery & deployment hardening",
+        description="v2.5.4 — groq key rotation & recovery",
         color=discord.Color.from_rgb(32, 32, 32),
     )
     embed.add_field(
@@ -775,6 +790,11 @@ async def updatelogs(interaction: discord.Interaction):
     embed.add_field(
         name="🤖 groq recovery",
         value="AI requests now report HTTP and network failures in the logs, making failed model calls easier to diagnose.",
+        inline=False,
+    )
+    embed.add_field(
+        name="🔑 multiple Groq API keys",
+        value="GROQ_API_KEY now accepts comma-separated keys and automatically tries the next key when a request fails.",
         inline=False,
     )
     embed.add_field(
