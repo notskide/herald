@@ -523,7 +523,10 @@ async def generate_ai_response(messages, user_id=None, report_context=None):
                 model_payload["reasoning_effort"] = "none"
             elif model_name.startswith("openai/gpt-oss-"):
                 model_payload["reasoning_effort"] = "low"
-                model_payload["reasoning_format"] = "hidden"
+                # Groq's GPT-OSS chat-completions API uses include_reasoning,
+                # not reasoning_format. Unsupported params can make every
+                # GPT-OSS fallback attempt fail with HTTP 400.
+                model_payload["include_reasoning"] = False
 
             for key_index, api_key in enumerate(api_keys, start=1):
                 headers = {
@@ -938,6 +941,11 @@ async def on_message(message):
             await message.reply(reply_text)
             return
 
+        # Send the answer BEFORE writing memory. Previously, a slow/blocked
+        # memory-channel send could leave users seeing only the typing indicator.
+        for index in range(0, len(reply_text), 1999):
+            await message.reply(reply_text[index:index + 1999])
+
         clean_bot_mem = {"role": "assistant", "content": reply_text}
         updated_memory_history = []
 
@@ -954,10 +962,11 @@ async def on_message(message):
 
         updated_memory_history.append(clean_user_mem)
         updated_memory_history.append(clean_bot_mem)
-        await save_memory(updated_memory_history)
-
-        for index in range(0, len(reply_text), 1999):
-            await message.reply(reply_text[index:index + 1999])
+        try:
+            await asyncio.wait_for(save_memory(updated_memory_history), timeout=5)
+        except Exception as memory_exc:
+            print(f"[Herald] Reply was sent, but memory save failed/timed out: "
+                  f"{type(memory_exc).__name__}: {memory_exc}")
 
     except Exception:
         error_trace = traceback.format_exc()
