@@ -498,6 +498,7 @@ async def generate_ai_response(messages, user_id=None, report_context=None):
     url = "https://api.groq.com/openai/v1/chat/completions"
     sanitized_messages = sanitize_messages(messages)
 
+    last_error = None
     async with aiohttp.ClientSession() as session:
         for model_name in FALLBACK_MODELS:
             for key_index, api_key in enumerate(api_keys, start=1):
@@ -557,17 +558,23 @@ async def generate_ai_response(messages, user_id=None, report_context=None):
                             if response.status in (413, 429):
                                 return f"Groq API error (HTTP {response.status}): {cause[:500]}", False
                             return f"Groq API error (HTTP {response.status}): {cause[:500]}", False
-                except asyncio.TimeoutError:
-                    print(f"[Groq] Timeout while calling {model_name} using key {key_index}.")
+                except asyncio.TimeoutError as exc:
+                    last_error = f"Request timed out after 30 seconds while calling model {model_name}."
+                    print(f"[Groq] {last_error}")
                 except aiohttp.ClientError as exc:
+                    last_error = f"Network/connection error ({type(exc).__name__}): {str(exc) or 'no additional details'}"
                     print(f"[Groq] Network error for {model_name} using key {key_index}: {exc}")
-                except Exception:
+                except Exception as exc:
+                    last_error = f"Unexpected error ({type(exc).__name__}): {str(exc) or 'no additional details'}"
                     traceback.print_exc()
 
     if user_id is not None:
         cooling_down_users.add(user_id)
 
-    return "brb wifi acting up", False
+    reason = last_error or "No response was received from the Groq API. Check the bot logs and API configuration."
+    if report_context:
+        await notify_superuser_api_error("Groq request failed", reason, report_context)
+    return f"i couldn't complete that request. **Error:** {reason[:700]}", False
 
 
 @app.route("/", methods=["GET", "POST"])
@@ -929,9 +936,29 @@ async def on_message(message):
         except Exception:
             pass
         try:
-            await message.reply("my brain broke for a sec.")
+            error_line = error_trace.strip().splitlines()[-1] if error_trace.strip() else "Unknown error"
+            await message.reply(
+                f"i couldn't finish that request. **Error:** `{error_line[:700]}`\n"
+                "try again in a bit; i've logged the failure."
+            )
         except Exception:
             pass
+
+
+@bot.tree.error
+async def on_app_command_error(interaction: discord.Interaction, error: app_commands.AppCommandError):
+    """Tell the person who invoked a slash command what actually failed."""
+    original = getattr(error, "original", error)
+    detail = f"{type(original).__name__}: {str(original) or 'no additional details'}"
+    print(f"[Herald] Slash command error for user {interaction.user.id}: {detail}")
+    response_text = f"i couldn't complete that command. **Error:** `{detail[:900]}`"
+    try:
+        if interaction.response.is_done():
+            await interaction.followup.send(response_text, ephemeral=True)
+        else:
+            await interaction.response.send_message(response_text, ephemeral=True)
+    except Exception as send_error:
+        print(f"[Herald] Could not send command error to invoking user: {send_error}")
 
 
 @bot.tree.command(name="ping", description="displays herald's connection latency.")
@@ -1064,6 +1091,13 @@ async def speak(interaction: discord.Interaction, text: str):
         communicate = edge_tts.Communicate(text, voice)
         await communicate.save(filename)
         await interaction.followup.send(file=discord.File(filename))
+    except Exception as exc:
+        detail = f"{type(exc).__name__}: {str(exc) or 'no additional details'}"
+        print(f"[Herald] /speak failed for user {interaction.user.id}: {detail}")
+        await interaction.followup.send(
+            f"i couldn't generate that audio. **Error:** `{detail[:900]}`",
+            ephemeral=True,
+        )
     finally:
         if os.path.exists(filename):
             os.remove(filename)
