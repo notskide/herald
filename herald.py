@@ -1255,8 +1255,8 @@ async def updatelogs(interaction: discord.Interaction):
         inline=False,
     )
     embed.add_field(
-        name="🧾 audit-friendly controls",
-        value="automations can be listed, tested, paused, resumed, or deleted, with confirmation before a new rule is saved.",
+        name="🧾 audit history",
+        value="Herald records who granted permissions, created or changed automations, enabled templates, tested rules, and scheduled announcements. Managers can inspect recent entries with /herald audit.",
         inline=False,
     )
     embed.set_footer(text="herald · v4.0.0")
