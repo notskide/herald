@@ -289,6 +289,7 @@ class SetupWizardView(discord.ui.View):
         self.guild_id = guild.id
         self.role_id = None
         self.channel_id = None
+        self.verify_channel_id = None
 
     async def interaction_check(self, interaction):
         if interaction.guild is None or interaction.guild.id != self.guild_id or not can_manage(interaction.guild, interaction.user):
@@ -306,14 +307,20 @@ class SetupWizardView(discord.ui.View):
         self.channel_id = select.values[0].id
         await interaction.response.send_message(f"channel selected: {select.values[0].mention}", ephemeral=True)
 
+    @discord.ui.select(cls=discord.ui.ChannelSelect, channel_types=[discord.ChannelType.text, discord.ChannelType.news], placeholder="Choose the verification channel", min_values=1, max_values=1)
+    async def choose_verify_channel(self, interaction, select):
+        self.verify_channel_id = select.values[0].id
+        await interaction.response.send_message(f"verification channel selected: {select.values[0].mention}", ephemeral=True)
+
     @discord.ui.button(label="Enable welcome setup", style=discord.ButtonStyle.success)
     async def enable(self, interaction, button):
-        if self.role_id is None or self.channel_id is None:
-            await interaction.response.send_message("choose both a role and a channel first.", ephemeral=True)
+        if self.role_id is None or self.channel_id is None or self.verify_channel_id is None:
+            await interaction.response.send_message("choose a role, welcome channel, and verification channel first.", ephemeral=True)
             return
         try:
             role = find_role(interaction.guild, str(self.role_id))
             channel = find_text_channel(interaction.guild, str(self.channel_id))
+            verify_channel = find_text_channel(interaction.guild, str(self.verify_channel_id))
             plan = validate_plan(interaction.guild, {
                 "name": "welcome and verification",
                 "trigger": "member_join",
@@ -322,7 +329,7 @@ class SetupWizardView(discord.ui.View):
                     {
                         "type": "send_message",
                         "channel": str(channel.id),
-                        "message": "welcome {member}! please read the instructions and verify yourself in the verification channel.",
+                        "message": f"welcome {{member}}! please verify yourself in {verify_channel.mention} to unlock the server.",
                         "mention_member": True,
                     },
                 ],
@@ -331,7 +338,7 @@ class SetupWizardView(discord.ui.View):
         except Exception as exc:
             await interaction.response.send_message(f"couldn't enable the welcome setup: {str(exc)[:700]}", ephemeral=True)
             return
-        await interaction.response.edit_message(content=f"welcome automation enabled ({item['id']}). New members will receive {role.mention} and a message in {channel.mention}.", view=None)
+        await interaction.response.edit_message(content=f"welcome automation enabled ({item['id']}). New members will receive {role.mention}, a welcome in {channel.mention}, and a verification link to {verify_channel.mention}.", view=None)
 
 
 async def handle_owner_automation_message(message, bot, generate_ai_response):
