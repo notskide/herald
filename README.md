@@ -88,6 +88,7 @@ Server administrators can use server-management features, but only the owner can
 - `/herald automations pause`
 - `/herald automations resume`
 - `/herald automations delete`
+- `/herald audit` to inspect recent configuration changes and who made them.
 
 Supported natural-language triggers are member joins, member leaves, and messages containing a specified phrase. Supported actions are assigning an existing role to a joining member and sending a message to an existing text channel. Herald does not execute generated code, mass-ban, mass-kick, delete channels, or perform destructive moderation actions.
 
@@ -101,7 +102,7 @@ Schedule an announcement with `/herald schedule`. The time must be ISO 8601 and 
 
 ## Persistent storage
 
-Herald stores its server automation settings, delegated permissions, activity timestamps, and scheduled announcements in `herald_data.json`. Keep this file on persistent storage when deploying to a host that uses ephemeral filesystems; otherwise settings may be lost on restart or redeploy.
+Herald stores its server automation settings, delegated permissions, activity timestamps, scheduled announcements, and the latest 100 audit entries per server in `herald_data.json`. Keep this file on persistent storage when deploying to a host that uses ephemeral filesystems; otherwise settings may be lost on restart or redeploy.
 
 Existing Herald files such as `guild_settings.json`, `banned_users.json`, and `pending_deliveries.json` remain separate and continue to be used by the existing bot features.
 
