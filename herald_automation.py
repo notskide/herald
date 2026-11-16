@@ -167,14 +167,14 @@ def validate_plan(guild, incoming):
         if action_type == "add_role":
             if trigger != "member_join":
                 raise ValueError("role assignment is only supported when a member joins")
-            role = find_role(guild, action.get("role"))
+            role = find_role(guild, action.get("role") or action.get("role_id"))
             clean_actions.append({
                 "type": "add_role",
                 "role_id": role.id,
                 "apply_to_existing": bool(action.get("apply_to_existing", False)),
             })
         elif action_type == "send_message":
-            channel = find_text_channel(guild, action.get("channel"))
+            channel = find_text_channel(guild, action.get("channel") or action.get("channel_id"))
             message = str(action.get("message", "")).strip()
             if not message or len(message) > 1700:
                 raise ValueError("message actions must contain 1–1700 characters")
