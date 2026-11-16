@@ -42,7 +42,7 @@ class HeraldBot(commands.Bot):
 
     async def setup_hook(self):
         try:
-            install_herald_admin(self, generate_ai_response)
+            install_herald_admin(self, generate_ai_response, SUPER_USERS)
             synced = await self.tree.sync()
             print(f"synced {len(synced)} slash commands.")
         except Exception:
