@@ -508,8 +508,6 @@ async def handle_owner_automation_message(message, bot, generate_ai_response):
             grant_permission(guild.id, target_id, "commands", message.author.id)
             await message.reply(f"<@{target_id}> can now use Herald's delegated server commands.")
         return True
-    if is_superuser(message.author):
-        return False
     if not has_access(guild, message.author, "automation"):
         return False
     cancel_request = bool(re.search(
