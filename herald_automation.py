@@ -1,0 +1,782 @@
+import asyncio
+import json
+import os
+import re
+import time
+import uuid
+from collections import defaultdict, deque
+from datetime import datetime, timezone
+
+import discord
+from discord import app_commands
+
+DATA_FILE = "herald_data.json"
+DATA = {"guilds": {}, "scheduled": []}
+SPAM_WINDOWS = defaultdict(deque)
+SPAM_COOLDOWNS = {}
+ALLOWED_MENTIONS = discord.AllowedMentions(users=True, roles=False, everyone=False)
+
+
+def load_data():
+    global DATA
+    if not os.path.exists(DATA_FILE):
+        DATA = {"guilds": {}, "scheduled": []}
+        return
+    try:
+        with open(DATA_FILE, "r", encoding="utf-8") as file:
+            loaded = json.load(file)
+        DATA = loaded if isinstance(loaded, dict) else {"guilds": {}, "scheduled": []}
+        DATA.setdefault("guilds", {})
+        DATA.setdefault("scheduled", [])
+    except (OSError, json.JSONDecodeError):
+        DATA = {"guilds": {}, "scheduled": []}
+
+
+def save_data():
+    temporary = DATA_FILE + ".tmp"
+    with open(temporary, "w", encoding="utf-8") as file:
+        json.dump(DATA, file, indent=2, ensure_ascii=False)
+    os.replace(temporary, DATA_FILE)
+
+
+def guild_config(guild_id):
+    config = DATA.setdefault("guilds", {}).setdefault(str(guild_id), {})
+    config.setdefault("permissions", {})
+    config.setdefault("automations", [])
+    config.setdefault("anti_spam", {"enabled": False, "channel_id": None, "threshold": 6, "window_seconds": 7})
+    config.setdefault("inactivity", {"enabled": False, "channel_id": None, "days": 14, "notified": []})
+    config.setdefault("last_activity", {})
+    return config
+
+
+def is_owner(guild, user):
+    return bool(guild and user and guild.owner_id == user.id)
+
+
+def has_access(guild, user, scope):
+    if not guild or not user:
+        return False
+    if is_owner(guild, user) or getattr(getattr(user, "guild_permissions", None), "administrator", False):
+        return True
+    permissions = guild_config(guild.id).get("permissions", {})
+    granted = set(permissions.get(str(user.id), []))
+    return "admin" in granted or scope in granted
+
+
+def can_manage(guild, user):
+    return has_access(guild, user, "admin")
+
+
+def grant_permission(guild_id, user_id, scope):
+    config = guild_config(guild_id)
+    entries = config["permissions"].setdefault(str(user_id), [])
+    if scope not in entries:
+        entries.append(scope)
+    save_data()
+
+
+def revoke_permission(guild_id, user_id, scope):
+    config = guild_config(guild_id)
+    entries = config["permissions"].get(str(user_id), [])
+    if scope in entries:
+        entries.remove(scope)
+    if not entries:
+        config["permissions"].pop(str(user_id), None)
+    save_data()
+
+
+def get_automation(guild, automation_id):
+    return next((item for item in guild_config(guild.id)["automations"] if item.get("id") == automation_id), None)
+
+
+def find_role(guild, value):
+    raw = str(value or "").strip()
+    match = re.search(r"<@&(\d+)>", raw)
+    role = guild.get_role(int(match.group(1))) if match else None
+    if role is None and raw.isdigit():
+        role = guild.get_role(int(raw))
+    if role is None:
+        role = discord.utils.find(lambda item: item.name.casefold() == raw.casefold(), guild.roles)
+    if role is None or role.is_default() or role.managed:
+        raise ValueError(f"could not find a usable role for {raw[:80]}")
+    me = guild.me
+    if me is None or not me.guild_permissions.manage_roles:
+        raise ValueError("Herald needs the Manage Roles permission.")
+    if role >= me.top_role:
+        raise ValueError(f"Herald's highest role must be above {role.name}.")
+    return role
+
+
+def find_text_channel(guild, value):
+    raw = str(value or "").strip()
+    match = re.search(r"<#(\d+)>", raw)
+    channel = guild.get_channel(int(match.group(1))) if match else None
+    if channel is None and raw.isdigit():
+        channel = guild.get_channel(int(raw))
+    if channel is None:
+        channel = discord.utils.find(
+            lambda item: isinstance(item, (discord.TextChannel, discord.Thread))
+            and item.name.casefold() == raw.casefold(),
+            guild.channels,
+        )
+    if not isinstance(channel, (discord.TextChannel, discord.Thread)):
+        raise ValueError(f"could not find a text channel for {raw[:80]}")
+    permissions = channel.permissions_for(guild.me)
+    if not permissions.send_messages:
+        raise ValueError(f"Herald cannot send messages in #{channel.name}.")
+    return channel
+
+
+def validate_plan(guild, incoming):
+    if not isinstance(incoming, dict):
+        raise ValueError("the automation planner did not return a valid object")
+    trigger = str(incoming.get("trigger", "")).strip().lower()
+    if trigger not in ("member_join", "member_leave", "message_contains"):
+        raise ValueError("supported triggers are member joins, member leaves, and matching messages")
+    condition = str(incoming.get("condition", "")).strip()[:120]
+    if trigger == "message_contains" and not condition:
+        raise ValueError("a message trigger needs a keyword or phrase")
+    actions = incoming.get("actions")
+    if not isinstance(actions, list) or not 1 <= len(actions) <= 4:
+        raise ValueError("an automation needs between 1 and 4 actions")
+    clean_actions = []
+    for action in actions:
+        if not isinstance(action, dict):
+            raise ValueError("one of the actions was malformed")
+        action_type = str(action.get("type", "")).strip().lower()
+        if action_type == "add_role":
+            if trigger != "member_join":
+                raise ValueError("role assignment is only supported when a member joins")
+            role = find_role(guild, action.get("role"))
+            clean_actions.append({"type": "add_role", "role_id": role.id})
+        elif action_type == "send_message":
+            channel = find_text_channel(guild, action.get("channel"))
+            message = str(action.get("message", "")).strip()
+            if not message or len(message) > 1700:
+                raise ValueError("message actions must contain 1–1700 characters")
+            if "@everyone" in message or "@here" in message:
+                raise ValueError("mass mentions are not allowed in automations")
+            clean_actions.append({
+                "type": "send_message",
+                "channel_id": channel.id,
+                "message": message,
+                "mention_member": bool(action.get("mention_member", False)),
+            })
+        else:
+            raise ValueError("supported actions are role assignment and sending a message")
+    name = re.sub(r"\s+", " ", str(incoming.get("name", "custom automation"))).strip()[:70]
+    return {"name": name or "custom automation", "trigger": trigger, "condition": condition, "actions": clean_actions}
+
+
+async def plan_from_request(guild, request_text, generate_ai_response):
+    roles = [{"name": role.name, "id": role.id} for role in guild.roles if not role.is_default() and not role.managed]
+    channels = [{"name": channel.name, "id": channel.id} for channel in guild.text_channels]
+    system = (
+        "You translate a server owner's request into one safe Discord automation plan. "
+        "Return exactly one JSON object, with no markdown. Allowed keys: name, trigger, condition, actions. "
+        "Allowed triggers: member_join, member_leave, message_contains. "
+        "Allowed actions: {type:add_role, role:<role name or id>} and "
+        "{type:send_message, channel:<text channel name or id>, message:<text>, mention_member:<boolean>}. "
+        "Use only the roles and channels listed in the server inventory. Never invent IDs. "
+        "Use {member} as the placeholder for the member mention. Do not include @everyone or @here. "
+        "Do not create destructive, moderation, permission, or code-execution actions. "
+        "If the request cannot be represented by the allowed schema, return {\"error\":\"unsupported request\"}. "
+        "A welcome/verification request should usually add the requested role and send a short welcome message "
+        "to the requested channel, with verification instructions included in the message."
+    )
+    user = (
+        f"Server roles: {json.dumps(roles, ensure_ascii=False)}\n"
+        f"Server text channels: {json.dumps(channels, ensure_ascii=False)}\n"
+        f"Owner request: {request_text[:2500]}"
+    )
+    response, failed = await generate_ai_response([
+        {"role": "system", "content": system},
+        {"role": "user", "content": user},
+    ])
+    if failed or not response or response == "brb wifi acting up":
+        raise ValueError("Herald couldn't understand that request right now.")
+    cleaned = response.strip()
+    if cleaned.startswith(chr(96) * 3):
+        cleaned = cleaned.strip(chr(96)).strip()
+        if cleaned.lower().startswith("json"):
+            cleaned = cleaned[4:].strip()
+    start = cleaned.find("{")
+    end = cleaned.rfind("}")
+    if start < 0 or end <= start:
+        raise ValueError("the planner did not return a usable automation plan")
+    try:
+        incoming = json.loads(cleaned[start:end + 1])
+    except json.JSONDecodeError as exc:
+        raise ValueError("the planner returned invalid JSON; try phrasing the request more clearly") from exc
+    if incoming.get("error"):
+        raise ValueError("that request needs an action Herald doesn't support yet")
+    return validate_plan(guild, incoming)
+
+
+def save_automation(guild_id, plan, creator_id):
+    item = {
+        "id": uuid.uuid4().hex[:8],
+        "name": plan["name"],
+        "trigger": plan["trigger"],
+        "condition": plan.get("condition", ""),
+        "actions": plan["actions"],
+        "enabled": True,
+        "created_by": int(creator_id),
+        "created_at": int(time.time()),
+    }
+    guild_config(guild_id)["automations"].append(item)
+    save_data()
+    return item
+
+
+def plan_embed(plan):
+    labels = {
+        "member_join": "when a member joins",
+        "member_leave": "when a member leaves",
+        "message_contains": f"when a message contains “{plan.get('condition', '')}”",
+    }
+    embed = discord.Embed(
+        title="automation preview",
+        description=f"**{plan['name']}**\nTrigger: {labels[plan['trigger']]}",
+        color=discord.Color.blurple(),
+    )
+    for index, action in enumerate(plan["actions"], start=1):
+        if action["type"] == "add_role":
+            description = f"Assign <@&{action['role_id']}>"
+        else:
+            description = f"Send in <#{action['channel_id']}>:\n{action['message'][:700]}"
+        embed.add_field(name=f"Action {index}", value=description, inline=False)
+    embed.set_footer(text="Nothing is saved until an authorized person confirms.")
+    return embed
+
+
+class AutomationConfirmationView(discord.ui.View):
+    def __init__(self, guild_id, creator_id, plan):
+        super().__init__(timeout=150)
+        self.guild_id = int(guild_id)
+        self.creator_id = int(creator_id)
+        self.plan = plan
+
+    async def interaction_check(self, interaction):
+        guild = interaction.guild
+        if guild is None or not (is_owner(guild, interaction.user) or interaction.user.id == self.creator_id):
+            await interaction.response.send_message("only the server owner or the person who requested this can confirm it.", ephemeral=True)
+            return False
+        return True
+
+    @discord.ui.button(label="Confirm and enable", style=discord.ButtonStyle.success)
+    async def confirm(self, interaction, button):
+        guild = interaction.guild
+        if guild is None or guild.id != self.guild_id or not has_access(guild, interaction.user, "automation"):
+            await interaction.response.send_message("you no longer have permission to enable this automation.", ephemeral=True)
+            return
+        try:
+            plan = validate_plan(guild, self.plan)
+            item = save_automation(guild.id, plan, interaction.user.id)
+        except Exception as exc:
+            await interaction.response.send_message(f"couldn't save this automation: {str(exc)[:700]}", ephemeral=True)
+            return
+        await interaction.response.edit_message(content=f"enabled {item['name']} ({item['id']}).", embed=None, view=None)
+
+    @discord.ui.button(label="Cancel", style=discord.ButtonStyle.secondary)
+    async def cancel(self, interaction, button):
+        await interaction.response.edit_message(content="automation cancelled; nothing was saved.", embed=None, view=None)
+
+
+class SetupWizardView(discord.ui.View):
+    def __init__(self, guild):
+        super().__init__(timeout=180)
+        self.guild_id = guild.id
+        self.role_id = None
+        self.channel_id = None
+
+    async def interaction_check(self, interaction):
+        if interaction.guild is None or interaction.guild.id != self.guild_id or not can_manage(interaction.guild, interaction.user):
+            await interaction.response.send_message("only the server owner or an authorized server manager can use this setup.", ephemeral=True)
+            return False
+        return True
+
+    @discord.ui.select(cls=discord.ui.RoleSelect, placeholder="Choose the role new members should receive", min_values=1, max_values=1)
+    async def choose_role(self, interaction, select):
+        self.role_id = select.values[0].id
+        await interaction.response.send_message(f"role selected: {select.values[0].mention}", ephemeral=True)
+
+    @discord.ui.select(cls=discord.ui.ChannelSelect, channel_types=[discord.ChannelType.text, discord.ChannelType.news], placeholder="Choose the welcome / verification channel", min_values=1, max_values=1)
+    async def choose_channel(self, interaction, select):
+        self.channel_id = select.values[0].id
+        await interaction.response.send_message(f"channel selected: {select.values[0].mention}", ephemeral=True)
+
+    @discord.ui.button(label="Enable welcome setup", style=discord.ButtonStyle.success)
+    async def enable(self, interaction, button):
+        if self.role_id is None or self.channel_id is None:
+            await interaction.response.send_message("choose both a role and a channel first.", ephemeral=True)
+            return
+        try:
+            role = find_role(interaction.guild, str(self.role_id))
+            channel = find_text_channel(interaction.guild, str(self.channel_id))
+            plan = validate_plan(interaction.guild, {
+                "name": "welcome and verification",
+                "trigger": "member_join",
+                "actions": [
+                    {"type": "add_role", "role": str(role.id)},
+                    {
+                        "type": "send_message",
+                        "channel": str(channel.id),
+                        "message": "welcome {member}! please read the instructions and verify yourself in the verification channel.",
+                        "mention_member": True,
+                    },
+                ],
+            })
+            item = save_automation(interaction.guild.id, plan, interaction.user.id)
+        except Exception as exc:
+            await interaction.response.send_message(f"couldn't enable the welcome setup: {str(exc)[:700]}", ephemeral=True)
+            return
+        await interaction.response.edit_message(content=f"welcome automation enabled ({item['id']}). New members will receive {role.mention} and a message in {channel.mention}.", view=None)
+
+
+async def handle_owner_automation_message(message, bot, generate_ai_response):
+    guild = message.guild
+    if guild is None or message.author.bot:
+        return False
+    content = message.content or ""
+    if not (bot.user and (bot.user.mentioned_in(message) or "herald" in content.casefold())):
+        return False
+    target_match = re.search(r"<@!?(\d+)>", content)
+    if target_match and re.search(r"\b(allow|grant|enable|let|authorize|revoke|remove)\b", content, re.IGNORECASE) and re.search(r"\b(commands?|access)\b", content, re.IGNORECASE):
+        if not is_owner(guild, message.author):
+            await message.reply("only the server owner can change who has access to my commands.")
+            return True
+        target_id = int(target_match.group(1))
+        if target_id == guild.owner_id or target_id == message.author.id:
+            await message.reply("the server owner already has full access.")
+            return True
+        if re.search(r"\b(revoke|remove)\b", content, re.IGNORECASE):
+            revoke_permission(guild.id, target_id, "commands")
+            await message.reply(f"removed command access from <@{target_id}>.")
+        else:
+            grant_permission(guild.id, target_id, "commands")
+            await message.reply(f"<@{target_id}> can now use Herald's delegated server commands.")
+        return True
+    looks_like_automation = bool(re.search(
+        r"\b(automate|automation|make it so|set it up|when .*joins|if .*joins|new member|welcome message|"
+        r"give .*role|assign .*role|when .*leaves|goodbye message)\b",
+        content,
+        re.IGNORECASE,
+    ))
+    if not looks_like_automation or not has_access(guild, message.author, "automation"):
+        return False
+    try:
+        plan = await plan_from_request(guild, content, generate_ai_response)
+    except Exception as exc:
+        await message.reply(f"i couldn't turn that into an automation yet: {str(exc)[:700]}")
+        return True
+    await message.reply(embed=plan_embed(plan), view=AutomationConfirmationView(guild.id, message.author.id, plan), allowed_mentions=discord.AllowedMentions.none())
+    return True
+
+
+async def execute_actions(guild, member, automation, test=False):
+    for action in automation.get("actions", []):
+        if action["type"] == "add_role":
+            if test or member is None:
+                continue
+            role = guild.get_role(int(action["role_id"]))
+            if role is None:
+                continue
+            try:
+                await member.add_roles(role, reason=f"Herald automation {automation.get('id')}")
+            except (discord.Forbidden, discord.HTTPException) as exc:
+                print(f"[Herald automation] Role assignment failed in guild {guild.id}: {type(exc).__name__}: {exc}")
+        elif action["type"] == "send_message":
+            channel = guild.get_channel(int(action["channel_id"]))
+            if not isinstance(channel, (discord.TextChannel, discord.Thread)):
+                continue
+            content = str(action.get("message", ""))[:1800]
+            if member is not None:
+                content = content.replace("{member}", member.mention)
+            else:
+                content = content.replace("{member}", "a member")
+            if test:
+                content = f"[automation test] {content}"
+            allowed = ALLOWED_MENTIONS if action.get("mention_member") and not test else discord.AllowedMentions.none()
+            try:
+                await channel.send(content, allowed_mentions=allowed)
+            except (discord.Forbidden, discord.HTTPException) as exc:
+                print(f"[Herald automation] Message action failed in guild {guild.id}: {type(exc).__name__}: {exc}")
+
+
+async def member_join_event(bot, member):
+    config = guild_config(member.guild.id)
+    config["last_activity"].setdefault(str(member.id), int(time.time()))
+    save_data()
+    for automation in list(config["automations"]):
+        if automation.get("enabled") and automation.get("trigger") == "member_join":
+            await execute_actions(member.guild, member, automation)
+
+
+async def member_leave_event(bot, member):
+    config = guild_config(member.guild.id)
+    for automation in list(config["automations"]):
+        if automation.get("enabled") and automation.get("trigger") == "member_leave":
+            await execute_actions(member.guild, member, automation)
+
+
+async def message_tracking(message):
+    if message.guild is None or message.author.bot:
+        return
+    config = guild_config(message.guild.id)
+    config["last_activity"][str(message.author.id)] = int(time.time())
+    inactivity = config["inactivity"]
+    if str(message.author.id) in inactivity.get("notified", []):
+        inactivity["notified"].remove(str(message.author.id))
+    save_data()
+    for automation in list(config["automations"]):
+        if automation.get("enabled") and automation.get("trigger") == "message_contains":
+            if str(automation.get("condition", "")).casefold() in (message.content or "").casefold():
+                await execute_actions(message.guild, message.author, automation)
+    spam = config["anti_spam"]
+    if not spam.get("enabled"):
+        return
+    key = (message.guild.id, message.author.id)
+    now = time.monotonic()
+    bucket = SPAM_WINDOWS[key]
+    bucket.append(now)
+    window = int(spam.get("window_seconds", 7))
+    while bucket and now - bucket[0] > window:
+        bucket.popleft()
+    threshold = int(spam.get("threshold", 6))
+    if len(bucket) >= threshold and now - SPAM_COOLDOWNS.get(key, 0) >= 60:
+        SPAM_COOLDOWNS[key] = now
+        channel = message.guild.get_channel(int(spam["channel_id"])) if spam.get("channel_id") else message.channel
+        if isinstance(channel, (discord.TextChannel, discord.Thread)):
+            try:
+                await channel.send(f"{message.author.mention}, please slow down a little. The server's anti-spam alert was triggered.", allowed_mentions=discord.AllowedMentions(users=True, roles=False, everyone=False))
+            except (discord.Forbidden, discord.HTTPException):
+                pass
+
+
+async def maintenance_loop(bot):
+    last_inactivity_check = 0
+    while not bot.is_closed():
+        now = int(time.time())
+        changed = False
+        pending = []
+        for item in DATA.get("scheduled", []):
+            if int(item.get("run_at", 0)) > now:
+                pending.append(item)
+                continue
+            guild = bot.get_guild(int(item.get("guild_id", 0)))
+            channel = guild.get_channel(int(item.get("channel_id", 0))) if guild else None
+            if isinstance(channel, (discord.TextChannel, discord.Thread)):
+                try:
+                    await channel.send(str(item.get("message", ""))[:1900], allowed_mentions=discord.AllowedMentions.none())
+                    changed = True
+                except (discord.Forbidden, discord.HTTPException):
+                    item["attempts"] = int(item.get("attempts", 0)) + 1
+                    if item["attempts"] < 3:
+                        pending.append(item)
+                    changed = True
+            else:
+                item["attempts"] = int(item.get("attempts", 0)) + 1
+                if item["attempts"] < 3:
+                    pending.append(item)
+                changed = True
+        DATA["scheduled"] = pending
+        if now - last_inactivity_check >= 3600:
+            last_inactivity_check = now
+            for guild_id, config in DATA.get("guilds", {}).items():
+                settings = config.get("inactivity", {})
+                if not settings.get("enabled") or not settings.get("channel_id"):
+                    continue
+                guild = bot.get_guild(int(guild_id))
+                channel = guild.get_channel(int(settings["channel_id"])) if guild else None
+                if not isinstance(channel, (discord.TextChannel, discord.Thread)):
+                    continue
+                days = max(1, min(365, int(settings.get("days", 14))))
+                notified = set(settings.get("notified", []))
+                for user_id, last_seen in config.get("last_activity", {}).items():
+                    if user_id in notified or now - int(last_seen) < days * 86400:
+                        continue
+                    member = guild.get_member(int(user_id))
+                    if member is None or member.bot:
+                        continue
+                    try:
+                        await channel.send(f"{member.display_name} hasn't chatted here for {days}+ days.", allowed_mentions=discord.AllowedMentions.none())
+                        notified.add(user_id)
+                        changed = True
+                    except (discord.Forbidden, discord.HTTPException):
+                        pass
+                settings["notified"] = sorted(notified)
+        if changed:
+            save_data()
+        await asyncio.sleep(30)
+
+
+async def start_maintenance(bot):
+    task = getattr(bot, "_herald_maintenance_task", None)
+    if task is None or task.done():
+        bot._herald_maintenance_task = asyncio.create_task(maintenance_loop(bot))
+
+
+def build_command_tree(bot, generate_ai_response):
+    root = app_commands.Group(name="herald", description="Herald server assistant and automation tools")
+    automate_group = app_commands.Group(name="automate", description="Create automations from plain English")
+    automations_group = app_commands.Group(name="automations", description="Manage this server's automations")
+    permissions_group = app_commands.Group(name="permissions", description="Manage delegated Herald access")
+
+    @root.command(name="setup", description="Open the guided welcome and verification setup")
+    async def setup(interaction: discord.Interaction):
+        if interaction.guild is None or not can_manage(interaction.guild, interaction.user):
+            await interaction.response.send_message("you need server management permission to open setup.", ephemeral=True)
+            return
+        await interaction.response.send_message(
+            "choose the role new members should receive and the channel where Herald should welcome them.",
+            view=SetupWizardView(interaction.guild),
+            ephemeral=True,
+        )
+
+    @automate_group.command(name="request", description="Describe an automation in normal language")
+    @app_commands.describe(request="What should happen, and when?")
+    async def automate_request(interaction: discord.Interaction, request: str):
+        if interaction.guild is None or not has_access(interaction.guild, interaction.user, "automation"):
+            await interaction.response.send_message("you don't have permission to create automations in this server.", ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        try:
+            plan = await plan_from_request(interaction.guild, request, generate_ai_response)
+            await interaction.followup.send(embed=plan_embed(plan), view=AutomationConfirmationView(interaction.guild.id, interaction.user.id, plan), ephemeral=True)
+        except Exception as exc:
+            await interaction.followup.send(f"i couldn't create that preview: {str(exc)[:700]}", ephemeral=True)
+
+    @automations_group.command(name="list", description="List this server's saved automations")
+    async def automations_list(interaction: discord.Interaction):
+        if interaction.guild is None or not has_access(interaction.guild, interaction.user, "automation"):
+            await interaction.response.send_message("you don't have permission to view server automations.", ephemeral=True)
+            return
+        items = guild_config(interaction.guild.id)["automations"]
+        if not items:
+            await interaction.response.send_message("there aren't any automations set up yet. try /herald setup or /herald automate request.", ephemeral=True)
+            return
+        lines = [f"{item['id']} · {item['name']} · {item['trigger']} · {'on' if item.get('enabled') else 'paused'}" for item in items[:25]]
+        await interaction.response.send_message("\n".join(lines), ephemeral=True)
+
+    async def change_automation(interaction, automation_id, mode):
+        if interaction.guild is None or not has_access(interaction.guild, interaction.user, "automation"):
+            await interaction.response.send_message("you don't have permission to manage automations.", ephemeral=True)
+            return
+        item = get_automation(interaction.guild, automation_id)
+        if item is None:
+            await interaction.response.send_message("i couldn't find that automation ID.", ephemeral=True)
+            return
+        if mode == "delete":
+            guild_config(interaction.guild.id)["automations"].remove(item)
+            save_data()
+            await interaction.response.send_message(f"deleted {item['name']}.", ephemeral=True)
+            return
+        item["enabled"] = mode == "resume"
+        save_data()
+        await interaction.response.send_message(f"{item['name']} is now {'enabled' if item['enabled'] else 'paused'}.", ephemeral=True)
+
+    @automations_group.command(name="pause", description="Pause an automation")
+    async def automations_pause(interaction: discord.Interaction, automation_id: str):
+        await change_automation(interaction, automation_id, "pause")
+
+    @automations_group.command(name="resume", description="Resume an automation")
+    async def automations_resume(interaction: discord.Interaction, automation_id: str):
+        await change_automation(interaction, automation_id, "resume")
+
+    @automations_group.command(name="delete", description="Delete an automation")
+    async def automations_delete(interaction: discord.Interaction, automation_id: str):
+        await change_automation(interaction, automation_id, "delete")
+
+    @automations_group.command(name="test", description="Test an automation's message actions")
+    async def automations_test(interaction: discord.Interaction, automation_id: str):
+        if interaction.guild is None or not has_access(interaction.guild, interaction.user, "automation"):
+            await interaction.response.send_message("you don't have permission to test automations.", ephemeral=True)
+            return
+        item = get_automation(interaction.guild, automation_id)
+        if item is None:
+            await interaction.response.send_message("i couldn't find that automation ID.", ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True)
+        await execute_actions(interaction.guild, interaction.user, item, test=True)
+        await interaction.followup.send("test finished. Role changes are skipped during tests.", ephemeral=True)
+
+    @permissions_group.command(name="grant", description="Give a member a Herald permission")
+    @app_commands.describe(user="The member to authorize", scope="What they can do")
+    @app_commands.choices(scope=[
+        app_commands.Choice(name="Use delegated commands", value="commands"),
+        app_commands.Choice(name="Create and manage automations", value="automation"),
+        app_commands.Choice(name="Full Herald management", value="admin"),
+    ])
+    async def permissions_grant(interaction: discord.Interaction, user: discord.Member, scope: app_commands.Choice[str]):
+        if interaction.guild is None or not is_owner(interaction.guild, interaction.user):
+            await interaction.response.send_message("only the server owner can grant Herald permissions.", ephemeral=True)
+            return
+        if user.bot or user.id == interaction.guild.owner_id:
+            await interaction.response.send_message("choose a non-bot member other than the server owner.", ephemeral=True)
+            return
+        grant_permission(interaction.guild.id, user.id, scope.value)
+        await interaction.response.send_message(f"{user.mention} now has {scope.name} access.", ephemeral=True)
+
+    @permissions_group.command(name="revoke", description="Remove a member's Herald permission")
+    @app_commands.describe(user="The member to de-authorize", scope="The permission to remove")
+    @app_commands.choices(scope=[
+        app_commands.Choice(name="Use delegated commands", value="commands"),
+        app_commands.Choice(name="Create and manage automations", value="automation"),
+        app_commands.Choice(name="Full Herald management", value="admin"),
+    ])
+    async def permissions_revoke(interaction: discord.Interaction, user: discord.Member, scope: app_commands.Choice[str]):
+        if interaction.guild is None or not is_owner(interaction.guild, interaction.user):
+            await interaction.response.send_message("only the server owner can change Herald permissions.", ephemeral=True)
+            return
+        revoke_permission(interaction.guild.id, user.id, scope.value)
+        await interaction.response.send_message(f"removed {scope.name} access from {user.mention}.", ephemeral=True)
+
+    @permissions_group.command(name="list", description="Show delegated Herald permissions")
+    async def permissions_list(interaction: discord.Interaction):
+        if interaction.guild is None or not can_manage(interaction.guild, interaction.user):
+            await interaction.response.send_message("you need server management permission to view this.", ephemeral=True)
+            return
+        entries = guild_config(interaction.guild.id)["permissions"]
+        if not entries:
+            await interaction.response.send_message("no delegated permissions have been granted.", ephemeral=True)
+            return
+        lines = [f"<@{user_id}> · {', '.join(scopes)}" for user_id, scopes in entries.items()]
+        await interaction.response.send_message("\n".join(lines[:40]), ephemeral=True, allowed_mentions=discord.AllowedMentions.none())
+
+    @root.command(name="template", description="Enable a ready-made server automation")
+    @app_commands.describe(name="The template to enable", channel="Where Herald should post alerts", days="Inactivity threshold in days")
+    @app_commands.choices(name=[
+        app_commands.Choice(name="Anti-spam alerts", value="anti_spam"),
+        app_commands.Choice(name="Inactivity alerts", value="inactivity"),
+        app_commands.Choice(name="Goodbye messages", value="goodbye"),
+    ])
+    async def template(interaction: discord.Interaction, name: app_commands.Choice[str], channel: discord.TextChannel | None = None, days: app_commands.Range[int, 1, 365] = 14):
+        if interaction.guild is None or not can_manage(interaction.guild, interaction.user):
+            await interaction.response.send_message("you need server management permission to enable templates.", ephemeral=True)
+            return
+        target = channel or interaction.channel
+        if not isinstance(target, discord.TextChannel):
+            await interaction.response.send_message("choose a text channel for this template.", ephemeral=True)
+            return
+        if not target.permissions_for(interaction.guild.me).send_messages:
+            await interaction.response.send_message("Herald cannot send messages in that channel.", ephemeral=True)
+            return
+        config = guild_config(interaction.guild.id)
+        if name.value == "anti_spam":
+            config["anti_spam"] = {"enabled": True, "channel_id": target.id, "threshold": 6, "window_seconds": 7}
+            save_data()
+            await interaction.response.send_message(f"anti-spam alerts are on. Herald will warn after 6 messages in 7 seconds in {target.mention}; it won't delete or punish members.", ephemeral=True)
+        elif name.value == "inactivity":
+            config["inactivity"] = {"enabled": True, "channel_id": target.id, "days": days, "notified": []}
+            save_data()
+            await interaction.response.send_message(f"inactivity alerts are on. Herald will post in {target.mention} after {days} days without a message.", ephemeral=True)
+        else:
+            plan = validate_plan(interaction.guild, {
+                "name": "goodbye message",
+                "trigger": "member_leave",
+                "actions": [{"type": "send_message", "channel": str(target.id), "message": "goodbye {member}, take care!", "mention_member": False}],
+            })
+            item = save_automation(interaction.guild.id, plan, interaction.user.id)
+            await interaction.response.send_message(f"goodbye messages enabled in {target.mention} ({item['id']}).", ephemeral=True)
+
+    @root.command(name="schedule", description="Schedule an announcement using an ISO date and time")
+    @app_commands.describe(channel="Where to post", time_utc="ISO date and time with timezone, e.g. 2026-12-01T18:30:00+00:00", message="Announcement text")
+    async def schedule(interaction: discord.Interaction, channel: discord.TextChannel, time_utc: str, message: str):
+        if interaction.guild is None or not can_manage(interaction.guild, interaction.user):
+            await interaction.response.send_message("you need server management permission to schedule announcements.", ephemeral=True)
+            return
+        if not channel.permissions_for(interaction.guild.me).send_messages:
+            await interaction.response.send_message("Herald cannot send messages in that channel.", ephemeral=True)
+            return
+        try:
+            run_at = datetime.fromisoformat(time_utc.replace("Z", "+00:00"))
+            if run_at.tzinfo is None:
+                raise ValueError("timezone is required")
+            timestamp = int(run_at.astimezone(timezone.utc).timestamp())
+        except ValueError:
+            await interaction.response.send_message("use an ISO date and time with a timezone, such as 2026-12-01T18:30:00+00:00.", ephemeral=True)
+            return
+        if timestamp <= int(time.time()) or timestamp > int(time.time()) + 366 * 86400:
+            await interaction.response.send_message("choose a future time within the next year.", ephemeral=True)
+            return
+        if not message.strip() or len(message) > 1800 or "@everyone" in message or "@here" in message:
+            await interaction.response.send_message("the announcement must be 1–1800 characters and cannot use mass mentions.", ephemeral=True)
+            return
+        DATA["scheduled"].append({
+            "id": uuid.uuid4().hex[:8],
+            "guild_id": interaction.guild.id,
+            "channel_id": channel.id,
+            "run_at": timestamp,
+            "message": message.strip(),
+            "attempts": 0,
+        })
+        save_data()
+        await interaction.response.send_message(f"announcement scheduled for <t:{timestamp}:F> in {channel.mention}.", ephemeral=True)
+
+    @root.command(name="status", description="Check Herald's server permissions and feature status")
+    async def status(interaction: discord.Interaction):
+        if interaction.guild is None:
+            await interaction.response.send_message("use this command inside a server.", ephemeral=True)
+            return
+        me = interaction.guild.me
+        permissions = me.guild_permissions if me else None
+        config = guild_config(interaction.guild.id)
+        automation_count = len(config["automations"])
+        enabled_count = sum(1 for item in config["automations"] if item.get("enabled"))
+        embed = discord.Embed(title="Herald · server status", color=discord.Color.blurple())
+        embed.add_field(name="Automations", value=f"{enabled_count} enabled / {automation_count} total", inline=True)
+        embed.add_field(name="Anti-spam", value="on" if config["anti_spam"].get("enabled") else "off", inline=True)
+        embed.add_field(name="Inactivity alerts", value="on" if config["inactivity"].get("enabled") else "off", inline=True)
+        embed.add_field(name="Manage Roles", value="available" if permissions and permissions.manage_roles else "missing", inline=True)
+        embed.add_field(name="View Channels", value="available" if permissions and permissions.view_channel else "missing", inline=True)
+        embed.add_field(name="Send Messages", value="available" if permissions and permissions.send_messages else "missing", inline=True)
+        embed.set_footer(text="Herald 4.0.0")
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+
+    @root.command(name="command", description="Use a delegated, non-destructive Herald command")
+    @app_commands.describe(action="The action to run")
+    @app_commands.choices(action=[
+        app_commands.Choice(name="Ping", value="ping"),
+        app_commands.Choice(name="Server status", value="status"),
+        app_commands.Choice(name="List automations", value="automations"),
+    ])
+    async def delegated_command(interaction: discord.Interaction, action: app_commands.Choice[str]):
+        if interaction.guild is None or not has_access(interaction.guild, interaction.user, "commands"):
+            await interaction.response.send_message("the server owner hasn't granted you delegated command access.", ephemeral=True)
+            return
+        if action.value == "ping":
+            await interaction.response.send_message(f"pong · {round(bot.latency * 1000)}ms", ephemeral=True)
+        elif action.value == "status":
+            config = guild_config(interaction.guild.id)
+            enabled = sum(1 for item in config["automations"] if item.get("enabled"))
+            await interaction.response.send_message(f"Herald has {enabled} enabled automation(s) in this server.", ephemeral=True)
+        else:
+            items = guild_config(interaction.guild.id)["automations"]
+            lines = [f"{item['id']} · {item['name']} · {'on' if item.get('enabled') else 'paused'}" for item in items[:20]]
+            await interaction.response.send_message("\n".join(lines) if lines else "no automations are configured.", ephemeral=True)
+
+    root.add_command(automate_group)
+    root.add_command(automations_group)
+    root.add_command(permissions_group)
+    bot.tree.add_command(root)
+
+
+def install_herald_admin(bot, generate_ai_response):
+    load_data()
+    if bot.tree.get_command("herald") is None:
+        build_command_tree(bot, generate_ai_response)
+
+    async def ready_listener():
+        await start_maintenance(bot)
+
+    async def join_listener(member):
+        await member_join_event(bot, member)
+
+    async def leave_listener(member):
+        await member_leave_event(bot, member)
+
+    bot.add_listener(ready_listener, "on_ready")
+    bot.add_listener(join_listener, "on_member_join")
+    bot.add_listener(leave_listener, "on_member_remove")
+    bot.add_listener(message_tracking, "on_message")
