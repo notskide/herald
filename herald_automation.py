@@ -597,7 +597,7 @@ def build_command_tree(bot, generate_ai_response):
         if not items:
             await interaction.response.send_message("there aren't any automations set up yet. try /herald setup or /herald automate request.", ephemeral=True)
             return
-        lines = [f"{item['id']} · {item['name']} · {item['trigger']} · {'on' if item.get('enabled') else 'paused'}" for item in items[:25]]
+        lines = [f"{item['id']} · {item['name']} · {item['trigger']} · {'on' if item.get('enabled') else 'paused'}" for item in items[:12]]
         await interaction.response.send_message("\n".join(lines), ephemeral=True)
 
     @automations_group.command(name="edit", description="Edit an automation using a new plain-English request")
@@ -705,19 +705,19 @@ def build_command_tree(bot, generate_ai_response):
             await interaction.response.send_message("no delegated permissions have been granted.", ephemeral=True)
             return
         lines = [f"<@{user_id}> · {', '.join(scopes)}" for user_id, scopes in entries.items()]
-        await interaction.response.send_message("\n".join(lines[:40]), ephemeral=True, allowed_mentions=discord.AllowedMentions.none())
+        await interaction.response.send_message("\n".join(lines[:25]), ephemeral=True, allowed_mentions=discord.AllowedMentions.none())
 
     @root.command(name="audit", description="View recent Herald configuration and automation actions")
     async def audit(interaction: discord.Interaction):
         if interaction.guild is None or not can_manage(interaction.guild, interaction.user):
             await interaction.response.send_message("you need server management permission to view the audit log.", ephemeral=True)
             return
-        entries = list(reversed(guild_config(interaction.guild.id).get("audit_log", [])[-10:]))
+        entries = list(reversed(guild_config(interaction.guild.id).get("audit_log", [])[-6:]))
         if not entries:
             await interaction.response.send_message("there are no Herald audit entries for this server yet.", ephemeral=True)
             return
         lines = [
-            f"<t:{entry['timestamp']}:R> · <@{entry['actor_id']}> · {entry['event']}: {entry['details']}"
+            f"<t:{entry['timestamp']}:R> · <@{entry['actor_id']}> · {entry['event'][:40]}: {entry['details'][:90]}"
             for entry in entries
         ]
         await interaction.response.send_message("\n".join(lines), ephemeral=True, allowed_mentions=discord.AllowedMentions.none())
