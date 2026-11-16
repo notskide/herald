@@ -238,6 +238,16 @@ async def plan_from_request(guild, request_text, generate_ai_response):
         raise ValueError("the planner returned invalid JSON; try phrasing the request more clearly") from exc
     if incoming.get("error"):
         raise ValueError("that request needs an action Herald doesn't support yet")
+    wants_existing_members = re.search(
+        r"\b(existing members?|anyone who (?:doesn't|does not|don't|do not) have (?:it|that role)|"
+        r"members? who (?:don't|do not|doesn't|does not) have (?:it|that role))\b",
+        request_text,
+        re.IGNORECASE,
+    )
+    if wants_existing_members and isinstance(incoming.get("actions"), list):
+        for action in incoming["actions"]:
+            if isinstance(action, dict) and str(action.get("type", "")).casefold() == "add_role":
+                action["apply_to_existing"] = True
     return validate_plan(guild, incoming)
 
 
