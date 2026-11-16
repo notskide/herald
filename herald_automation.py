@@ -426,57 +426,61 @@ async def handle_superuser_direct_message(message, bot):
     guild = message.guild
     if guild is None or message.author.bot or not is_superuser(message.author):
         return False
-    content = message.content or ""
-    if not (bot.user and (bot.user.mentioned_in(message) or "herald" in content.casefold())):
+
+    content = re.sub(r"[\x60*_~]", "", message.content or "").strip()
+    has_self_target = bool(re.search(r"\b(?:me|myself)\b", content, re.IGNORECASE))
+    has_role_reference = bool(re.search(r"\brole\b|<@&\d+>", content, re.IGNORECASE))
+    if not has_self_target or not has_role_reference:
         return False
 
-    role_match = re.search(
-        r"\b(?:give|add|assign)\s+(?:me|myself)\s+(?:the\s+)?role(?:\s+(?:with\s+)?(?:id|ID))?\s*[:#]?\s*(<@&\d+>|\d{15,22})",
-        content,
-        re.IGNORECASE,
-    )
-    if role_match:
-        try:
-            role = find_role(guild, role_match.group(1))
-            member = guild.get_member(message.author.id)
-            if member is None:
-                member = await guild.fetch_member(message.author.id)
+    add_request = bool(re.search(r"\b(?:give|add|assign|grant)\b", content, re.IGNORECASE))
+    remove_request = bool(re.search(r"\b(?:remove|take\s+away|strip)\b", content, re.IGNORECASE))
+    if not (add_request or remove_request):
+        return False
+
+    role_mention = re.search(r"<@&(\d+)>", content)
+    role_id = role_mention.group(1) if role_mention else None
+    if role_id is None:
+        role_position = re.search(r"\brole\b", content, re.IGNORECASE)
+        trailing_ids = re.findall(r"(?<!\d)(\d{15,22})(?!\d)", content[role_position.end():]) if role_position else []
+        all_ids = re.findall(r"(?<!\d)(\d{15,22})(?!\d)", content)
+        if len(trailing_ids) == 1:
+            role_id = trailing_ids[0]
+        elif len(all_ids) == 1:
+            role_id = all_ids[0]
+
+    if role_id is None:
+        await message.reply("which role should i use? send its role ID or mention the role.")
+        return True
+
+    try:
+        role = find_role(guild, role_id)
+        member = guild.get_member(message.author.id)
+        if member is None:
+            member = await guild.fetch_member(message.author.id)
+
+        if add_request:
             if role in member.roles:
                 await message.reply(f"you already have **{role.name}**.")
                 return True
             await member.add_roles(role, reason=f"Herald direct instruction from superuser {message.author.id}")
             audit_event(guild.id, message.author.id, "superuser_role_added", f"assigned {role.name} ({role.id}) to {member.id}")
             await message.reply(f"done, i've given you **{role.name}**.")
-        except (ValueError, discord.Forbidden, discord.HTTPException) as exc:
-            await message.reply(f"i couldn't assign that role: {str(exc)[:500]}")
-        except Exception as exc:
-            await message.reply(f"i couldn't assign that role: {type(exc).__name__}: {str(exc)[:400]}")
-        return True
+            return True
 
-    role_remove_match = re.search(
-        r"\b(?:remove|take\s+away|strip)\s+(?:the\s+)?role(?:\s+(?:with\s+)?(?:id|ID))?\s*[:#]?\s*(<@&\d+>|\d{15,22})\s+from\s+(?:me|myself)\b",
-        content,
-        re.IGNORECASE,
-    )
-    if role_remove_match:
-        try:
-            role = find_role(guild, role_remove_match.group(1))
-            member = guild.get_member(message.author.id)
-            if member is None:
-                member = await guild.fetch_member(message.author.id)
-            if role not in member.roles:
-                await message.reply(f"you don't have **{role.name}**.")
-                return True
-            await member.remove_roles(role, reason=f"Herald direct instruction from superuser {message.author.id}")
-            audit_event(guild.id, message.author.id, "superuser_role_removed", f"removed {role.name} ({role.id}) from {member.id}")
-            await message.reply(f"done, i've removed **{role.name}** from you.")
-        except (ValueError, discord.Forbidden, discord.HTTPException) as exc:
-            await message.reply(f"i couldn't remove that role: {str(exc)[:500]}")
-        except Exception as exc:
-            await message.reply(f"i couldn't remove that role: {type(exc).__name__}: {str(exc)[:400]}")
-        return True
-
-    return False
+        if role not in member.roles:
+            await message.reply(f"you don't have **{role.name}**.")
+            return True
+        await member.remove_roles(role, reason=f"Herald direct instruction from superuser {message.author.id}")
+        audit_event(guild.id, message.author.id, "superuser_role_removed", f"removed {role.name} ({role.id}) from {member.id}")
+        await message.reply(f"done, i've removed **{role.name}** from you.")
+    except (ValueError, discord.Forbidden, discord.HTTPException) as exc:
+        action = "assign" if add_request else "remove"
+        await message.reply(f"i couldn't {action} that role: {str(exc)[:500]}")
+    except Exception as exc:
+        action = "assign" if add_request else "remove"
+        await message.reply(f"i couldn't {action} that role: {type(exc).__name__}: {str(exc)[:400]}")
+    return True
 
 
 async def handle_owner_automation_message(message, bot, generate_ai_response):
@@ -484,7 +488,7 @@ async def handle_owner_automation_message(message, bot, generate_ai_response):
     if guild is None or message.author.bot:
         return False
     content = message.content or ""
-    if not (bot.user and (bot.user.mentioned_in(message) or "herald" in content.casefold())):
+    if not is_superuser(message.author) and not (bot.user and (bot.user.mentioned_in(message) or "herald" in content.casefold())):
         return False
     target_matches = re.findall(r"<@!?(\d+)>", content)
     target_id_text = next((item for item in target_matches if not bot.user or int(item) != bot.user.id), None)
