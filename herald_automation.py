@@ -243,6 +243,18 @@ def save_automation(guild_id, plan, creator_id):
     return item
 
 
+def update_automation(guild, automation_id, plan, actor_id):
+    item = get_automation(guild, automation_id)
+    if item is None:
+        raise ValueError("that automation no longer exists")
+    item["name"] = plan["name"]
+    item["trigger"] = plan["trigger"]
+    item["condition"] = plan.get("condition", "")
+    item["actions"] = plan["actions"]
+    audit_event(guild.id, actor_id, "automation_edited", f"updated {item['name']} ({item['id']})")
+    return item
+
+
 def plan_embed(plan):
     labels = {
         "member_join": "when a member joins",
@@ -265,11 +277,12 @@ def plan_embed(plan):
 
 
 class AutomationConfirmationView(discord.ui.View):
-    def __init__(self, guild_id, creator_id, plan):
+    def __init__(self, guild_id, creator_id, plan, replace_id=None):
         super().__init__(timeout=150)
         self.guild_id = int(guild_id)
         self.creator_id = int(creator_id)
         self.plan = plan
+        self.replace_id = replace_id
 
     async def interaction_check(self, interaction):
         guild = interaction.guild
@@ -286,11 +299,12 @@ class AutomationConfirmationView(discord.ui.View):
             return
         try:
             plan = validate_plan(guild, self.plan)
-            item = save_automation(guild.id, plan, interaction.user.id)
+            item = update_automation(guild, self.replace_id, plan, interaction.user.id) if self.replace_id else save_automation(guild.id, plan, interaction.user.id)
         except Exception as exc:
             await interaction.response.send_message(f"couldn't save this automation: {str(exc)[:700]}", ephemeral=True)
             return
-        await interaction.response.edit_message(content=f"enabled {item['name']} ({item['id']}).", embed=None, view=None)
+        result = "updated" if self.replace_id else "enabled"
+        await interaction.response.edit_message(content=f"{result} {item['name']} ({item['id']}).", embed=None, view=None)
 
     @discord.ui.button(label="Cancel", style=discord.ButtonStyle.secondary)
     async def cancel(self, interaction, button):
@@ -585,6 +599,27 @@ def build_command_tree(bot, generate_ai_response):
             return
         lines = [f"{item['id']} · {item['name']} · {item['trigger']} · {'on' if item.get('enabled') else 'paused'}" for item in items[:25]]
         await interaction.response.send_message("\n".join(lines), ephemeral=True)
+
+    @automations_group.command(name="edit", description="Edit an automation using a new plain-English request")
+    @app_commands.describe(automation_id="The automation ID to replace", request="How the automation should work after the edit")
+    async def automations_edit(interaction: discord.Interaction, automation_id: str, request: str):
+        if interaction.guild is None or not has_access(interaction.guild, interaction.user, "automation"):
+            await interaction.response.send_message("you don't have permission to edit automations.", ephemeral=True)
+            return
+        if get_automation(interaction.guild, automation_id) is None:
+            await interaction.response.send_message("i couldn't find that automation ID.", ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        try:
+            plan = await plan_from_request(interaction.guild, request, generate_ai_response)
+            await interaction.followup.send(
+                "review the replacement plan. the current automation stays active unless you confirm.",
+                embed=plan_embed(plan),
+                view=AutomationConfirmationView(interaction.guild.id, interaction.user.id, plan, replace_id=automation_id),
+                ephemeral=True,
+            )
+        except Exception as exc:
+            await interaction.followup.send(f"i couldn't prepare that edit: {str(exc)[:700]}", ephemeral=True)
 
     async def change_automation(interaction, automation_id, mode):
         if interaction.guild is None or not has_access(interaction.guild, interaction.user, "automation"):
