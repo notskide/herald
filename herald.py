@@ -83,9 +83,9 @@ HERALD_SYSTEM_PROMPT = (
     "you are an AI. Decline only when the specific request genuinely crosses a safety or legal boundary, or you truly "
     "cannot do it, and explain naturally without a canned lecture. Never state or reveal your age. "
     "Use the current user's Discord display name when it is provided and addressing them by name feels natural; do not "
-    "Your long-term memory contains private, category-organized conversation archives for each user, plus a separate "
-    "shared global archive containing only broadly useful non-personal information. Use the current user’s private "
-    "archive and global archive when available; never mix another user’s private memories into this conversation. "
+    "use their name in every message. Your long-term memory contains private, category-organized conversation archives for each user, plus a separate "
+    "shared global archive containing only broadly useful non-personal information. Use the current user's private "
+    "archive and global archive when available; never mix another user's private memories into this conversation. "
     "Follow the user's actual request and all applicable instructions consistently; do not forget constraints halfway "
     "through. Keep replies very short by default: usually one short sentence or 1–2 brief sentences. "
     "Only give longer explanations when the user asks or the task genuinely needs them. Avoid filler and repeated conclusions. "
@@ -259,7 +259,7 @@ def sanitize_reply(text):
 PERSONAL_MEMORY_HEADER_RE = re.compile(r"^\[PERSONAL MEMORY\]\s+user_id=(\d+)\s+category=(.*?)\s+part=(\d+)$", re.IGNORECASE)
 GLOBAL_MEMORY_HEADER_RE = re.compile(r"^\[GLOBAL MEMORY\]\s+category=(.*?)\s+part=(\d+)$", re.IGNORECASE)
 MEMORY_MESSAGE_LIMIT = 2000
-MEMORY_HISTORY_SCAN_LIMIT = 1000
+MEMORY_HISTORY_SCAN_LIMIT = 5000
 memory_write_locks = {}
 
 
@@ -1127,7 +1127,7 @@ async def on_message(message):
             await message.reply(reply_text[index:index + 1999])
 
         prior_context = "\n".join(
-            str(item.get("content", ""))[-900:] for item in history if item.get("role") == "system"
+            str(item.get("content", ""))[-900:] for item in history if item.get("role") == "system" and str(item.get("content", "")).startswith("Private conversation archive")
         )[-2500:]
         attachment_memory = ""
         if message.attachments:
