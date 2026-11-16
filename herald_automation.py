@@ -110,12 +110,13 @@ def get_automation(guild, automation_id):
 
 def find_role(guild, value):
     raw = str(value or "").strip()
-    match = re.search(r"<@&(\d+)>", raw)
-    role = guild.get_role(int(match.group(1))) if match else None
-    if role is None and raw.isdigit():
-        role = guild.get_role(int(raw))
-    if role is None:
-        role = discord.utils.find(lambda item: item.name.casefold() == raw.casefold(), guild.roles)
+    mention = re.search(r"<@&(\d+)>", raw)
+    id_match = mention or re.search(r"(?<!\d)(\d{15,22})(?!\d)", raw)
+    role = guild.get_role(int(id_match.group(1))) if id_match else None
+    normalized = re.sub(r"<@&\d+>", "", raw)
+    normalized = re.sub(r"^@+", "", normalized).strip().casefold()
+    if role is None and normalized:
+        role = discord.utils.find(lambda item: item.name.casefold() == normalized, guild.roles)
     if role is None or role.is_default() or role.managed:
         raise ValueError(f"could not find a usable role for {raw[:80]}")
     me = guild.me
@@ -167,7 +168,11 @@ def validate_plan(guild, incoming):
             if trigger != "member_join":
                 raise ValueError("role assignment is only supported when a member joins")
             role = find_role(guild, action.get("role"))
-            clean_actions.append({"type": "add_role", "role_id": role.id})
+            clean_actions.append({
+                "type": "add_role",
+                "role_id": role.id,
+                "apply_to_existing": bool(action.get("apply_to_existing", False)),
+            })
         elif action_type == "send_message":
             channel = find_text_channel(guild, action.get("channel"))
             message = str(action.get("message", "")).strip()
@@ -194,8 +199,12 @@ async def plan_from_request(guild, request_text, generate_ai_response):
         "You translate a server owner's request into one safe Discord automation plan. "
         "Return exactly one JSON object, with no markdown. Allowed keys: name, trigger, condition, actions. "
         "Allowed triggers: member_join, member_leave, message_contains. "
-        "Allowed actions: {type:add_role, role:<role name or id>} and "
+        "Allowed actions: {type:add_role, role:<role name or id>, apply_to_existing:<boolean>} and "
         "{type:send_message, channel:<text channel name or id>, message:<text>, mention_member:<boolean>}. "
+        "For a request that says to give a role to new members AND also to existing members who lack it, "
+        "use one add_role action with apply_to_existing=true. This means Herald must backfill the role "
+        "to current non-bot members who do not already have it, as well as assign it to future joins. "
+        "Do not ignore the existing-member part of the request."
         "Use only the roles and channels listed in the server inventory. Never invent IDs. "
         "Use {member} as the placeholder for the member mention. When naming a channel inside message text, use its exact <#ID> mention from the inventory. Do not include @everyone or @here. "
         "Do not create destructive, moderation, permission, or code-execution actions. "
@@ -273,7 +282,9 @@ def plan_embed(plan):
     )
     for index, action in enumerate(plan["actions"], start=1):
         if action["type"] == "add_role":
-            description = f"Assign <@&{action['role_id']}>"
+            description = f"Assign <@&{action['role_id']}> to new members"
+            if action.get("apply_to_existing"):
+                description += " and existing members who don't have it yet"
         else:
             description = f"Send in <#{action['channel_id']}>:\n{action['message'][:700]}"
         embed.add_field(name=f"Action {index}", value=description, inline=False)
@@ -309,7 +320,14 @@ class AutomationConfirmationView(discord.ui.View):
             await interaction.response.send_message(f"couldn't save this automation: {str(exc)[:700]}", ephemeral=True)
             return
         result = "updated" if self.replace_id else "enabled"
-        await interaction.response.edit_message(content=f"{result} {item['name']} ({item['id']}).", embed=None, view=None)
+        backfill_roles = [action["role_id"] for action in plan["actions"] if action["type"] == "add_role" and action.get("apply_to_existing")]
+        if backfill_roles:
+            for role_id in backfill_roles:
+                asyncio.create_task(backfill_existing_members(guild, role_id, item["id"]))
+            detail = " i'm now assigning it to existing members who don't have it yet."
+        else:
+            detail = ""
+        await interaction.response.edit_message(content=f"{result} {item['name']} ({item['id']}).{detail}", embed=None, view=None)
 
     @discord.ui.button(label="Cancel", style=discord.ButtonStyle.secondary)
     async def cancel(self, interaction, button):
@@ -418,6 +436,35 @@ async def handle_owner_automation_message(message, bot, generate_ai_response):
         return True
     await message.reply(embed=plan_embed(plan), view=AutomationConfirmationView(guild.id, message.author.id, plan), allowed_mentions=discord.AllowedMentions.none())
     return True
+
+
+async def backfill_existing_members(guild, role_id, automation_id):
+    role = guild.get_role(int(role_id))
+    if role is None:
+        print(f"[Herald automation] Backfill skipped in guild {guild.id}: role {role_id} no longer exists.")
+        return
+    me = guild.me
+    if me is None or not me.guild_permissions.manage_roles or role >= me.top_role:
+        print(f"[Herald automation] Backfill skipped in guild {guild.id}: Herald cannot manage role {role_id}.")
+        return
+    assigned = 0
+    skipped = 0
+    failed = 0
+    try:
+        async for member in guild.fetch_members(limit=None):
+            if member.bot or role in member.roles:
+                skipped += 1
+                continue
+            try:
+                await member.add_roles(role, reason=f"Herald automation {automation_id} existing-member backfill")
+                assigned += 1
+            except (discord.Forbidden, discord.HTTPException) as exc:
+                failed += 1
+                print(f"[Herald automation] Backfill failed for member {member.id} in guild {guild.id}: {type(exc).__name__}: {exc}")
+    except (discord.Forbidden, discord.HTTPException) as exc:
+        print(f"[Herald automation] Could not fetch members for backfill in guild {guild.id}: {type(exc).__name__}: {exc}")
+        return
+    print(f"[Herald automation] Backfill finished for guild {guild.id}, automation {automation_id}: {assigned} assigned, {skipped} already had role or were bots, {failed} failed.")
 
 
 async def execute_actions(guild, member, automation, test=False):
