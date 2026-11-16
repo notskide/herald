@@ -83,9 +83,9 @@ HERALD_SYSTEM_PROMPT = (
     "you are an AI. Decline only when the specific request genuinely crosses a safety or legal boundary, or you truly "
     "cannot do it, and explain naturally without a canned lecture. Never state or reveal your age. "
     "Use the current user's Discord display name when it is provided and addressing them by name feels natural; do not "
-    "use their name in every message. Your long-term memory is a shared set of brief summaries of useful past "
-    "interactions across conversations, not verbatim transcripts; summaries may be incomplete, so do not invent "
-    "details or claim exact recall, and do not expose personal details unnecessarily. "
+    "Your long-term memory contains private, category-organized conversation archives for each user, plus a separate "
+    "shared global archive containing only broadly useful non-personal information. Use the current user’s private "
+    "archive and global archive when available; never mix another user’s private memories into this conversation. "
     "Follow the user's actual request and all applicable instructions consistently; do not forget constraints halfway "
     "through. Keep replies very short by default: usually one short sentence or 1–2 brief sentences. "
     "Only give longer explanations when the user asks or the task genuinely needs them. Avoid filler and repeated conclusions. "
@@ -223,7 +223,7 @@ guild_settings = load_json(SETTINGS_FILE)
 banned_users = load_list(BANNED_USERS_FILE)
 pending_deliveries = load_json(DELIVERIES_FILE)
 cooling_down_users = set()
-# Keep references to fire-and-forget summary tasks so the event loop cannot collect them early.
+# Keep references to background memory tasks so the event loop cannot collect them early.
 background_memory_tasks = set()
 
 
@@ -408,7 +408,7 @@ async def load_memory(user_id):
     personal = {}
     global_records = {}
     try:
-        async for stored in channel.history(limit=MEMORY_HISTORY_SCAN_LIMIT, oldest_first=True):
+        async for stored in channel.history(limit=MEMORY_HISTORY_SCAN_LIMIT, oldest_first=False):
             if bot.user is None or stored.author.id != bot.user.id:
                 continue
             content = (stored.content or "").strip()
@@ -854,7 +854,7 @@ input[type="submit"] {{ padding: 8px 14px; background-color: #0066cc; color: #ff
 </style>
 </head>
 <body>
-<h2>Herald Web Interface <span style="font-size:11px;color:#888888;">v4.0.0</span></h2>
+<h2>Herald Web Interface <span style="font-size:11px;color:#888888;">v4.1.0</span></h2>
 <div class="chat-container">
 {chat_history_rendered}
 </div>
@@ -1070,9 +1070,6 @@ async def on_message(message):
                 content = item["parts"][0].get("text", "")
             else:
                 content = str(item.get("content", ""))
-            # Summary notes are already incorporated into the main system prompt.
-            if role == "system" and str(content).startswith("Stored conversation summary"):
-                continue
             if content.strip():
                 formatted_history.append({"role": role, "content": content.strip()})
 
