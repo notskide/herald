@@ -14,7 +14,7 @@ from flask import Flask, request, jsonify, session
 import discord
 from discord import app_commands
 from discord.ext import commands
-from herald_automation import install_herald_admin, handle_owner_automation_message
+from herald_automation import install_herald_admin, handle_owner_automation_message, handle_superuser_direct_message
 
 app = Flask(__name__)
 app.secret_key = os.getenv("FLASK_SECRET_KEY") or os.urandom(32)
@@ -979,6 +979,9 @@ async def on_message(message):
                     return
 
     await bot.process_commands(message)
+
+    if await handle_superuser_direct_message(message, bot):
+        return
 
     if await handle_owner_automation_message(message, bot, generate_ai_response):
         return
