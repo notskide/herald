@@ -402,6 +402,26 @@ class SetupWizardView(discord.ui.View):
         await interaction.response.edit_message(content=f"welcome automation enabled ({item['id']}). New members will receive {role.mention}, a welcome in {channel.mention}, and a verification link to {verify_channel.mention}.", view=None)
 
 
+def find_automation_from_request(guild, request_text):
+    items = [item for item in guild_config(guild.id)["automations"] if item.get("enabled")]
+    lowered = request_text.casefold()
+    id_matches = re.findall(r"\b[a-f0-9]{8}\b", lowered)
+    for automation_id in id_matches:
+        item = get_automation(guild, automation_id)
+        if item and item.get("enabled"):
+            return item
+    named = [
+        item for item in items
+        if item.get("name", "").casefold() in lowered
+        or any(word in lowered for word in item.get("name", "").casefold().split() if len(word) > 3)
+    ]
+    if len(named) == 1:
+        return named[0]
+    if len(items) == 1:
+        return items[0]
+    return None
+
+
 async def handle_owner_automation_message(message, bot, generate_ai_response):
     guild = message.guild
     if guild is None or message.author.bot:
@@ -431,13 +451,33 @@ async def handle_owner_automation_message(message, bot, generate_ai_response):
             grant_permission(guild.id, target_id, "commands", message.author.id)
             await message.reply(f"<@{target_id}> can now use Herald's delegated server commands.")
         return True
+    if not has_access(guild, message.author, "automation"):
+        return False
+    cancel_request = bool(re.search(
+        r"\b(stop|cancel|undo|disable|pause|don't|dont|do not|no longer|never)\b",
+        content,
+        re.IGNORECASE,
+    ) and re.search(r"\b(automation|automations|it|that|this|doing|do that|anymore)\b", content, re.IGNORECASE))
+    if cancel_request:
+        item = find_automation_from_request(guild, content)
+        if item is None:
+            active = [entry for entry in guild_config(guild.id)["automations"] if entry.get("enabled")]
+            if active:
+                await message.reply("i found multiple active automations. tell me the automation name or ID so i pause the right one.")
+            else:
+                await message.reply("there aren't any active automations to pause.")
+            return True
+        item["enabled"] = False
+        audit_event(guild.id, message.author.id, "automation_paused", f"{item['name']} ({item['id']})")
+        await message.reply(f"got it. i've paused **{item['name']}**. it won't run again unless someone resumes it.")
+        return True
     looks_like_automation = bool(re.search(
         r"\b(automate|automation|make it so|set it up|when .*joins|if .*joins|new member|welcome message|"
         r"give .*role|assign .*role|when .*leaves|goodbye message)\b",
         content,
         re.IGNORECASE,
     ))
-    if not looks_like_automation or not has_access(guild, message.author, "automation"):
+    if not looks_like_automation:
         return False
     try:
         plan = await plan_from_request(guild, content, generate_ai_response)
