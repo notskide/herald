@@ -1,112 +1,155 @@
-# Herald 4.0.0
+# herald 4.1.0
 
-Herald is a short, casual Discord chatbot with server-aware automation tools.
+herald is a casual discord chatbot with server tools, automations, and memory that actually keeps the conversation instead of turning everything into a summary.
 
-## What's new in 4.0.0
+## what's new in 4.1.0
 
-- Shorter, more natural conversation by default.
-- Plain-English automation requests for member joins, member leaves, and matching message phrases.
-- A confirmation preview before a new automation is saved.
-- Guided welcome and verification setup with role, welcome-channel, and verification-channel selectors.
-- Owner-controlled delegated permissions for commands, automation management, and full Herald management.
-- Automation list, test, pause, resume, and delete controls.
-- Anti-spam warning alerts, inactivity alerts, goodbye-message templates, and scheduled announcements.
-- Server status checks for Herald's available permissions.
+- herald now saves the original user and herald messages, not ai generated summaries.
+- conversations are sorted into topic based categories, like hosting platforms or programming.
+- each person's private categories stay separate from everyone else's.
+- long categories automatically continue in part 2, part 3, and so on when they reach discord's message limit.
+- there's a separate global archive for information that's useful to everyone and isn't personal.
+- herald can skip saving an exchange when someone asks it not to remember something.
+- basic secret redaction helps keep passwords, api keys, and similar credentials out of memory.
 
-## Requirements
+## what herald can do
 
-- Python 3.10 or newer.
-- A Discord bot application and token.
-- A Groq API key for chat and natural-language automation planning.
+- chat naturally and keep conversation history.
+- create automations from plain english requests.
+- react to new members, members leaving, and messages containing a phrase.
+- assign roles and send messages to channels through approved automations.
+- guide server owners through welcome and verification setup.
+- manage delegated permissions for commands, automations, and full herald management.
+- provide anti spam alerts, inactivity alerts, goodbye messages, and scheduled announcements.
+- keep an audit history of important server configuration changes.
 
-Install the dependencies:
+## requirements
+
+- python 3.10 or newer.
+- a discord bot application and its token.
+- a groq api key for chat and natural language automation planning.
+
+install the dependencies:
 
 ```sh
 python -m pip install -r requirements.txt
 ```
 
-## Environment variables
+## environment variables
 
-Set these in your hosting provider:
+set these in your hosting provider:
 
-- `DISCORD_BOT_TOKEN`: required Discord bot token. `DISCORD_TOKEN` is accepted as a legacy fallback.
-- `GROQ_API_KEY`: required Groq API key. Multiple keys can be supplied as comma-separated values.
-- `FLASK_SECRET_KEY`: a long, random secret used to sign web-interface sessions. Set this to a persistent value in production.
-- `PORT`: optional web health-check port; defaults to `8080`.
+- `DISCORD_BOT_TOKEN`: required discord bot token. `DISCORD_TOKEN` also works as a legacy fallback.
+- `GROQ_API_KEY`: required groq api key. you can provide multiple keys as comma separated values.
+- `FLASK_SECRET_KEY`: a long, random secret for web interface sessions. keep it persistent in production.
+- `PORT`: optional web health check port. defaults to `8080`.
 
-Start Herald:
+start herald:
 
 ```sh
 python herald.py
 ```
 
-## Discord Developer Portal setup
+## discord setup
 
-Enable the **Server Members Intent** and **Message Content Intent** for the bot. Herald uses member events for join/leave automations and message content for chat, message-triggered automations, anti-spam alerts, and activity tracking.
+in the discord developer portal, enable:
 
-Give the bot only the permissions it needs:
+- **server members intent**
+- **message content intent**
 
-- View Channels
-- Send Messages
-- Read Message History
-- Embed Links
-- Use Application Commands
-- Manage Roles, only if automatic role assignment is needed
+herald needs these for member join and leave events, chat, message automations, anti spam alerts, and activity tracking.
 
-For role assignment, move Herald's highest role above every role it needs to assign. Herald checks the role hierarchy before saving a rule and Discord checks it again when a member joins.
+give the bot only the permissions it needs:
 
-## First-time server setup
+- view channels
+- send messages
+- read message history
+- embed links
+- use application commands
+- manage roles, only if you want automatic role assignment
 
-1. Invite Herald with the permissions above.
-2. Run `/herald setup` to open the welcome and verification wizard.
-3. Choose the member role, welcome channel, and verification channel.
-4. Confirm the setup.
-5. Use `/herald status` to check Herald's permissions.
+if you're using role assignment, move herald's highest role above the roles it needs to assign. discord checks the role hierarchy when an automation runs.
 
-You can also describe an automation directly to Herald in a server channel, for example:
+## first time setup
+
+1. invite herald to your server with the permissions above.
+2. run `/herald setup`.
+3. choose the member role, welcome channel, and verification channel.
+4. confirm the setup.
+5. run `/herald status` to check its permissions.
+
+you can also just tell herald what you want an automation to do. for example:
 
 > hey herald, when a new member joins, give them the member role and welcome them in #unverified-chat with a link to #verify
 
-Herald will create a preview. Nothing is saved until an authorized person presses **Confirm and enable**. The slash-command alternative is `/herald automate request`.
+herald shows a preview first. nothing gets saved until someone with permission presses **confirm and enable**. you can also use `/herald automate request`.
 
-## Permissions
+## permissions
 
-Only the server owner can grant or revoke delegated access:
+the server owner can grant or revoke delegated access:
 
-- **Commands**: use the safe delegated commands under `/herald command`.
-- **Automation**: create and manage automations.
-- **Full management**: manage Herald's server features.
+- **commands**: use the safe delegated commands under `/herald command`.
+- **automation**: create and manage automations.
+- **full management**: manage herald's server features.
 
-Use `/herald permissions grant`, `/herald permissions revoke`, and `/herald permissions list`. The owner can also ask Herald in natural language to let a mentioned member use delegated commands.
+use:
 
-Server administrators can use server-management features, but only the owner can grant or revoke delegated permissions.
+- `/herald permissions grant`
+- `/herald permissions revoke`
+- `/herald permissions list`
 
-## Automation controls
+server administrators can use server management features too, but delegated permissions are controlled by the server owner.
+
+## automation controls
+
+use these commands to manage automations:
 
 - `/herald automations list`
 - `/herald automations test`
-- `/herald automations edit` to preview and confirm a replacement plan.
+- `/herald automations edit`
 - `/herald automations pause`
 - `/herald automations resume`
 - `/herald automations delete`
-- `/herald audit` to inspect recent configuration changes and who made them.
+- `/herald audit`
 
-Supported natural-language triggers are member joins, member leaves, and messages containing a specified phrase. Supported actions are assigning an existing role to a joining member and sending a message to an existing text channel. Herald does not execute generated code, mass-ban, mass-kick, delete channels, or perform destructive moderation actions.
+right now, natural language automations support member joins, member leaves, and messages containing a specific phrase. actions can assign an existing role to a joining member or send a message to an existing text channel.
 
-Ready-made templates are available with `/herald template`; anti-spam and inactivity alerts can also be disabled from the same command:
+herald doesn't run generated code, mass ban or kick members, delete channels, or perform destructive moderation actions.
 
-- Anti-spam: warns after a burst of messages. It does not automatically delete messages or punish members.
-- Inactivity: posts an alert after the configured number of days without activity. Tracking begins when Herald sees a member join or message.
-- Goodbye: posts a message when a member leaves.
+## templates and schedules
 
-Schedule an announcement with `/herald schedule`. The time must be ISO 8601 and include a timezone, for example `2026-12-01T18:30:00+00:00`. UTC is recommended.
+ready made templates are available through `/herald template`.
 
-## Persistent storage
+- **anti spam**: warns after a burst of messages. it doesn't automatically delete messages or punish members.
+- **inactivity**: posts an alert after the configured number of days without activity. tracking starts when herald sees a member join or send a message.
+- **goodbye**: sends a message when a member leaves.
 
-Herald stores its server automation settings, delegated permissions, activity timestamps, scheduled announcements, and the latest 100 audit entries per server in `herald_data.json`. Keep this file on persistent storage when deploying to a host that uses ephemeral filesystems; otherwise settings may be lost on restart or redeploy.
+you can disable anti spam and inactivity alerts through the template command.
 
-Existing Herald files such as `guild_settings.json`, `banned_users.json`, and `pending_deliveries.json` remain separate and continue to be used by the existing bot features.
+to schedule an announcement, use `/herald schedule`. the time must use ISO 8601 and include a timezone. for example:
 
-## Patch notes
+```text
+2026-12-01T18:30:00+00:00
+```
 
-See [CHANGELOG.md](CHANGELOG.md), or use `/updatelogs` in Discord.
+utc is recommended.
+
+## memory and privacy
+
+herald stores conversations as original exchanges inside its memory channel. categories are private to the person they belong to when herald retrieves memory, while the separate global archive is reserved for broadly useful, non personal information.
+
+a category gets another numbered part when it reaches discord's 2,000 character message limit. herald also has basic secret redaction and can leave an exchange out of memory when asked.
+
+**important:** per user separation controls what herald loads into a conversation. it does not make messages in the discord memory channel individually private. restrict that channel to herald and trusted admins if you want to protect the stored archives from other server members.
+
+## persistent storage
+
+herald stores server automation settings, delegated permissions, activity timestamps, scheduled announcements, and the latest 100 audit entries per server in `herald_data.json`.
+
+keep this file on persistent storage if your host uses an ephemeral filesystem, or those settings may disappear after a restart or redeploy.
+
+existing files like `guild_settings.json`, `banned_users.json`, and `pending_deliveries.json` are separate and are still used by the bot.
+
+## patch notes
+
+check [CHANGELOG.md](CHANGELOG.md) or use `/updatelogs` in discord to see what's changed.
