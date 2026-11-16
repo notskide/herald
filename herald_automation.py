@@ -178,7 +178,7 @@ async def plan_from_request(guild, request_text, generate_ai_response):
         "Allowed actions: {type:add_role, role:<role name or id>} and "
         "{type:send_message, channel:<text channel name or id>, message:<text>, mention_member:<boolean>}. "
         "Use only the roles and channels listed in the server inventory. Never invent IDs. "
-        "Use {member} as the placeholder for the member mention. Do not include @everyone or @here. "
+        "Use {member} as the placeholder for the member mention. When naming a channel inside message text, use its exact <#ID> mention from the inventory. Do not include @everyone or @here. "
         "Do not create destructive, moderation, permission, or code-execution actions. "
         "If the request cannot be represented by the allowed schema, return {\"error\":\"unsupported request\"}. "
         "A welcome/verification request should usually add the requested role and send a short welcome message "
@@ -341,12 +341,18 @@ async def handle_owner_automation_message(message, bot, generate_ai_response):
     content = message.content or ""
     if not (bot.user and (bot.user.mentioned_in(message) or "herald" in content.casefold())):
         return False
-    target_match = re.search(r"<@!?(\d+)>", content)
-    if target_match and re.search(r"\b(allow|grant|enable|let|authorize|revoke|remove)\b", content, re.IGNORECASE) and re.search(r"\b(commands?|access)\b", content, re.IGNORECASE):
+    target_matches = re.findall(r"<@!?(\d+)>", content)
+    target_id_text = next((item for item in target_matches if not bot.user or int(item) != bot.user.id), None)
+    permission_request = (
+        re.search(r"\b(allow|grant|enable|let|authorize|revoke|remove|make)\b", content, re.IGNORECASE)
+        and re.search(r"\b(commands?|access)\b", content, re.IGNORECASE)
+        and re.search(r"\b(able|use|access|permission|commands?)\b", content, re.IGNORECASE)
+    )
+    if target_id_text and permission_request:
         if not is_owner(guild, message.author):
             await message.reply("only the server owner can change who has access to my commands.")
             return True
-        target_id = int(target_match.group(1))
+        target_id = int(target_id_text)
         if target_id == guild.owner_id or target_id == message.author.id:
             await message.reply("the server owner already has full access.")
             return True
@@ -397,7 +403,7 @@ async def execute_actions(guild, member, automation, test=False):
                 content = content.replace("{member}", "a member")
             if test:
                 content = f"[automation test] {content}"
-            allowed = ALLOWED_MENTIONS if action.get("mention_member") and not test else discord.AllowedMentions.none()
+            allowed = discord.AllowedMentions(users=[member] if action.get("mention_member") and member is not None and not test else [], roles=False, everyone=False)
             try:
                 await channel.send(content, allowed_mentions=allowed)
             except (discord.Forbidden, discord.HTTPException) as exc:
