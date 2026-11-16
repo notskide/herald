@@ -42,6 +42,7 @@ def save_data():
 def guild_config(guild_id):
     config = DATA.setdefault("guilds", {}).setdefault(str(guild_id), {})
     config.setdefault("permissions", {})
+    config.setdefault("audit_log", [])
     config.setdefault("automations", [])
     config.setdefault("anti_spam", {"enabled": False, "channel_id": None, "threshold": 6, "window_seconds": 7})
     config.setdefault("inactivity", {"enabled": False, "channel_id": None, "days": 14, "notified": []})
@@ -67,22 +68,35 @@ def can_manage(guild, user):
     return has_access(guild, user, "admin")
 
 
-def grant_permission(guild_id, user_id, scope):
+def audit_event(guild_id, actor_id, event, details):
+    config = guild_config(guild_id)
+    entries = config.setdefault("audit_log", [])
+    entries.append({
+        "timestamp": int(time.time()),
+        "actor_id": int(actor_id) if actor_id is not None else 0,
+        "event": str(event)[:60],
+        "details": str(details).replace("@everyone", "@ everyone").replace("@here", "@ here")[:180],
+    })
+    config["audit_log"] = entries[-100:]
+    save_data()
+
+
+def grant_permission(guild_id, user_id, scope, actor_id=None):
     config = guild_config(guild_id)
     entries = config["permissions"].setdefault(str(user_id), [])
     if scope not in entries:
         entries.append(scope)
-    save_data()
+    audit_event(guild_id, actor_id if actor_id is not None else user_id, "permission_granted", f"member {user_id} received {scope}")
 
 
-def revoke_permission(guild_id, user_id, scope):
+def revoke_permission(guild_id, user_id, scope, actor_id=None):
     config = guild_config(guild_id)
     entries = config["permissions"].get(str(user_id), [])
     if scope in entries:
         entries.remove(scope)
     if not entries:
         config["permissions"].pop(str(user_id), None)
-    save_data()
+    audit_event(guild_id, actor_id if actor_id is not None else user_id, "permission_revoked", f"member {user_id} lost {scope}")
 
 
 def get_automation(guild, automation_id):
@@ -225,7 +239,7 @@ def save_automation(guild_id, plan, creator_id):
         "created_at": int(time.time()),
     }
     guild_config(guild_id)["automations"].append(item)
-    save_data()
+    audit_event(guild_id, creator_id, "automation_created", f"created {item['name']} ({item['id']})")
     return item
 
 
@@ -364,10 +378,10 @@ async def handle_owner_automation_message(message, bot, generate_ai_response):
             await message.reply("the server owner already has full access.")
             return True
         if re.search(r"\b(revoke|remove)\b", content, re.IGNORECASE):
-            revoke_permission(guild.id, target_id, "commands")
+            revoke_permission(guild.id, target_id, "commands", message.author.id)
             await message.reply(f"removed command access from <@{target_id}>.")
         else:
-            grant_permission(guild.id, target_id, "commands")
+            grant_permission(guild.id, target_id, "commands", message.author.id)
             await message.reply(f"<@{target_id}> can now use Herald's delegated server commands.")
         return True
     looks_like_automation = bool(re.search(
@@ -582,11 +596,11 @@ def build_command_tree(bot, generate_ai_response):
             return
         if mode == "delete":
             guild_config(interaction.guild.id)["automations"].remove(item)
-            save_data()
+            audit_event(interaction.guild.id, interaction.user.id, "automation_deleted", f"deleted {item['name']} ({item['id']})")
             await interaction.response.send_message(f"deleted {item['name']}.", ephemeral=True)
             return
         item["enabled"] = mode == "resume"
-        save_data()
+        audit_event(interaction.guild.id, interaction.user.id, "automation_resumed" if item["enabled"] else "automation_paused", f"{item['name']} ({item['id']})")
         await interaction.response.send_message(f"{item['name']} is now {'enabled' if item['enabled'] else 'paused'}.", ephemeral=True)
 
     @automations_group.command(name="pause", description="Pause an automation")
@@ -612,6 +626,7 @@ def build_command_tree(bot, generate_ai_response):
             return
         await interaction.response.defer(ephemeral=True)
         await execute_actions(interaction.guild, interaction.user, item, test=True)
+        audit_event(interaction.guild.id, interaction.user.id, "automation_tested", f"{item['name']} ({item['id']})")
         await interaction.followup.send("test finished. Role changes are skipped during tests.", ephemeral=True)
 
     @permissions_group.command(name="grant", description="Give a member a Herald permission")
@@ -628,7 +643,7 @@ def build_command_tree(bot, generate_ai_response):
         if user.bot or user.id == interaction.guild.owner_id:
             await interaction.response.send_message("choose a non-bot member other than the server owner.", ephemeral=True)
             return
-        grant_permission(interaction.guild.id, user.id, scope.value)
+        grant_permission(interaction.guild.id, user.id, scope.value, interaction.user.id)
         await interaction.response.send_message(f"{user.mention} now has {scope.name} access.", ephemeral=True)
 
     @permissions_group.command(name="revoke", description="Remove a member's Herald permission")
@@ -642,7 +657,7 @@ def build_command_tree(bot, generate_ai_response):
         if interaction.guild is None or not is_owner(interaction.guild, interaction.user):
             await interaction.response.send_message("only the server owner can change Herald permissions.", ephemeral=True)
             return
-        revoke_permission(interaction.guild.id, user.id, scope.value)
+        revoke_permission(interaction.guild.id, user.id, scope.value, interaction.user.id)
         await interaction.response.send_message(f"removed {scope.name} access from {user.mention}.", ephemeral=True)
 
     @permissions_group.command(name="list", description="Show delegated Herald permissions")
@@ -656,6 +671,21 @@ def build_command_tree(bot, generate_ai_response):
             return
         lines = [f"<@{user_id}> · {', '.join(scopes)}" for user_id, scopes in entries.items()]
         await interaction.response.send_message("\n".join(lines[:40]), ephemeral=True, allowed_mentions=discord.AllowedMentions.none())
+
+    @root.command(name="audit", description="View recent Herald configuration and automation actions")
+    async def audit(interaction: discord.Interaction):
+        if interaction.guild is None or not can_manage(interaction.guild, interaction.user):
+            await interaction.response.send_message("you need server management permission to view the audit log.", ephemeral=True)
+            return
+        entries = list(reversed(guild_config(interaction.guild.id).get("audit_log", [])[-10:]))
+        if not entries:
+            await interaction.response.send_message("there are no Herald audit entries for this server yet.", ephemeral=True)
+            return
+        lines = [
+            f"<t:{entry['timestamp']}:R> · <@{entry['actor_id']}> · {entry['event']}: {entry['details']}"
+            for entry in entries
+        ]
+        await interaction.response.send_message("\n".join(lines), ephemeral=True, allowed_mentions=discord.AllowedMentions.none())
 
     @root.command(name="template", description="Enable a ready-made server automation")
     @app_commands.describe(name="The template to enable", channel="Where Herald should post alerts", days="Inactivity threshold in days")
@@ -678,11 +708,11 @@ def build_command_tree(bot, generate_ai_response):
         config = guild_config(interaction.guild.id)
         if name.value == "anti_spam":
             config["anti_spam"] = {"enabled": True, "channel_id": target.id, "threshold": 6, "window_seconds": 7}
-            save_data()
+            audit_event(interaction.guild.id, interaction.user.id, "template_enabled", f"anti-spam alerts in channel {target.id}")
             await interaction.response.send_message(f"anti-spam alerts are on. Herald will warn after 6 messages in 7 seconds in {target.mention}; it won't delete or punish members.", ephemeral=True)
         elif name.value == "inactivity":
             config["inactivity"] = {"enabled": True, "channel_id": target.id, "days": days, "notified": []}
-            save_data()
+            audit_event(interaction.guild.id, interaction.user.id, "template_enabled", f"inactivity alerts in channel {target.id}; threshold {days} days")
             await interaction.response.send_message(f"inactivity alerts are on. Herald will post in {target.mention} after {days} days without a message.", ephemeral=True)
         else:
             plan = validate_plan(interaction.guild, {
@@ -716,15 +746,16 @@ def build_command_tree(bot, generate_ai_response):
         if not message.strip() or len(message) > 1800 or "@everyone" in message or "@here" in message:
             await interaction.response.send_message("the announcement must be 1–1800 characters and cannot use mass mentions.", ephemeral=True)
             return
+        schedule_id = uuid.uuid4().hex[:8]
         DATA["scheduled"].append({
-            "id": uuid.uuid4().hex[:8],
+            "id": schedule_id,
             "guild_id": interaction.guild.id,
             "channel_id": channel.id,
             "run_at": timestamp,
             "message": message.strip(),
             "attempts": 0,
         })
-        save_data()
+        audit_event(interaction.guild.id, interaction.user.id, "announcement_scheduled", f"schedule {schedule_id} in channel {channel.id} at {timestamp}")
         await interaction.response.send_message(f"announcement scheduled for <t:{timestamp}:F> in {channel.mention}.", ephemeral=True)
 
     @root.command(name="status", description="Check Herald's server permissions and feature status")
