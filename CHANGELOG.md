@@ -11,7 +11,8 @@
 - Automation listing, testing, pausing, resuming, and deletion.
 - Anti-spam warning alerts, inactivity alerts, goodbye-message templates, and scheduled announcements.
 - A server status command showing key bot permissions and enabled features.
-- Persistent server configuration in `herald_data.json`.
+- Persistent server configuration and a 100-entry-per-server audit history in `herald_data.json`.
+- `/herald audit` for recent changes, including who granted permissions and who created, changed, or tested automations.
 
 ### Changed
 - Herald defaults to very short, natural replies.
