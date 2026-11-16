@@ -722,16 +722,29 @@ def build_command_tree(bot, generate_ai_response):
         ]
         await interaction.response.send_message("\n".join(lines), ephemeral=True, allowed_mentions=discord.AllowedMentions.none())
 
-    @root.command(name="template", description="Enable a ready-made server automation")
-    @app_commands.describe(name="The template to enable", channel="Where Herald should post alerts", days="Inactivity threshold in days")
+    @root.command(name="template", description="Enable or disable a ready-made server automation")
+    @app_commands.describe(name="The template to change", channel="Where Herald should post alerts", days="Inactivity threshold in days")
     @app_commands.choices(name=[
-        app_commands.Choice(name="Anti-spam alerts", value="anti_spam"),
-        app_commands.Choice(name="Inactivity alerts", value="inactivity"),
-        app_commands.Choice(name="Goodbye messages", value="goodbye"),
+        app_commands.Choice(name="Enable anti-spam alerts", value="anti_spam"),
+        app_commands.Choice(name="Enable inactivity alerts", value="inactivity"),
+        app_commands.Choice(name="Enable goodbye messages", value="goodbye"),
+        app_commands.Choice(name="Disable anti-spam alerts", value="disable_anti_spam"),
+        app_commands.Choice(name="Disable inactivity alerts", value="disable_inactivity"),
     ])
     async def template(interaction: discord.Interaction, name: app_commands.Choice[str], channel: discord.TextChannel | None = None, days: app_commands.Range[int, 1, 365] = 14):
         if interaction.guild is None or not can_manage(interaction.guild, interaction.user):
-            await interaction.response.send_message("you need server management permission to enable templates.", ephemeral=True)
+            await interaction.response.send_message("you need server management permission to change templates.", ephemeral=True)
+            return
+        config = guild_config(interaction.guild.id)
+        if name.value == "disable_anti_spam":
+            config["anti_spam"]["enabled"] = False
+            audit_event(interaction.guild.id, interaction.user.id, "template_disabled", "anti-spam alerts")
+            await interaction.response.send_message("anti-spam alerts are off.", ephemeral=True)
+            return
+        if name.value == "disable_inactivity":
+            config["inactivity"]["enabled"] = False
+            audit_event(interaction.guild.id, interaction.user.id, "template_disabled", "inactivity alerts")
+            await interaction.response.send_message("inactivity alerts are off.", ephemeral=True)
             return
         target = channel or interaction.channel
         if not isinstance(target, discord.TextChannel):
@@ -740,7 +753,6 @@ def build_command_tree(bot, generate_ai_response):
         if not target.permissions_for(interaction.guild.me).send_messages:
             await interaction.response.send_message("Herald cannot send messages in that channel.", ephemeral=True)
             return
-        config = guild_config(interaction.guild.id)
         if name.value == "anti_spam":
             config["anti_spam"] = {"enabled": True, "channel_id": target.id, "threshold": 6, "window_seconds": 7}
             audit_event(interaction.guild.id, interaction.user.id, "template_enabled", f"anti-spam alerts in channel {target.id}")
