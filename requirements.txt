@@ -1,5 +1,5 @@
-discord.py
-aiohttp
-requests
-edge-tts
-flask
+discord.py>=2.4,<3.0
+aiohttp>=3.9
+requests>=2.31
+edge-tts>=6.1
+Flask>=3.0
