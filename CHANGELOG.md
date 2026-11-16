@@ -1,5 +1,19 @@
 # Changelog
 
+## 4.1.0 — 2026-11-16
+
+### Added
+- Full conversation archives stored as original user and Herald exchanges instead of AI-generated summaries.
+- Separate private memory categories for each Discord user, organized by conversation topic.
+- Automatic continuation into Part 2, Part 3, and later messages when a category reaches Discord's message limit.
+- A separate global memory archive for broadly useful, non-personal information that is safe to share across users.
+- Per-user memory retrieval so Herald loads only the current user's private categories alongside the shared global archive.
+- Basic secret redaction and an option to keep an exchange off the record by asking Herald not to remember or save it.
+
+### Changed
+- Herald's memory instructions and the web interface now identify version 4.1.0.
+- The `/updatelogs` command now describes the full conversation memory system.
+
 ## 4.0.0 — 2026-11-16
 
 ### Added
