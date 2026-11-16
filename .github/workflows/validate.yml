@@ -19,3 +19,7 @@ jobs:
         run: python -m compileall -q herald.py herald_automation.py
       - name: Import automation engine
         run: python -c "import herald_automation; print('Herald automation engine loaded')"
+      - name: Build slash command tree
+        run: python -c "import discord; from discord.ext import commands; from herald_automation import build_command_tree; bot = commands.Bot(command_prefix='!', intents=discord.Intents.default()); build_command_tree(bot, None); assert bot.tree.get_command('herald') is not None; print('Herald slash command tree built')"
+      - name: Import main bot
+        run: python -c "import herald; print('Herald main bot imported')"
