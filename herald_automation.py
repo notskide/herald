@@ -446,6 +446,8 @@ async def execute_actions(guild, member, automation, test=False):
 
 
 async def member_join_event(bot, member):
+    if member.bot:
+        return
     config = guild_config(member.guild.id)
     config["last_activity"].setdefault(str(member.id), int(time.time()))
     save_data()
@@ -455,6 +457,8 @@ async def member_join_event(bot, member):
 
 
 async def member_leave_event(bot, member):
+    if member.bot:
+        return
     config = guild_config(member.guild.id)
     for automation in list(config["automations"]):
         if automation.get("enabled") and automation.get("trigger") == "member_leave":
