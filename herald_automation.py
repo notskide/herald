@@ -12,6 +12,7 @@ from discord import app_commands
 
 DATA_FILE = "herald_data.json"
 DATA = {"guilds": {}, "scheduled": []}
+SUPER_USERS = set()
 SPAM_WINDOWS = defaultdict(deque)
 SPAM_COOLDOWNS = {}
 ALLOWED_MENTIONS = discord.AllowedMentions(users=True, roles=False, everyone=False)
@@ -54,10 +55,14 @@ def is_owner(guild, user):
     return bool(guild and user and guild.owner_id == user.id)
 
 
+def is_superuser(user):
+    return bool(user and user.id in SUPER_USERS)
+
+
 def has_access(guild, user, scope):
     if not guild or not user:
         return False
-    if is_owner(guild, user) or getattr(getattr(user, "guild_permissions", None), "administrator", False):
+    if is_owner(guild, user) or is_superuser(user) or getattr(getattr(user, "guild_permissions", None), "administrator", False):
         return True
     permissions = guild_config(guild.id).get("permissions", {})
     granted = set(permissions.get(str(user.id), []))
@@ -286,7 +291,7 @@ class AutomationConfirmationView(discord.ui.View):
 
     async def interaction_check(self, interaction):
         guild = interaction.guild
-        if guild is None or not (is_owner(guild, interaction.user) or interaction.user.id == self.creator_id):
+        if guild is None or not (can_manage(guild, interaction.user) or interaction.user.id == self.creator_id):
             await interaction.response.send_message("only the server owner or the person who requested this can confirm it.", ephemeral=True)
             return False
         return True
@@ -384,8 +389,8 @@ async def handle_owner_automation_message(message, bot, generate_ai_response):
         and re.search(r"\b(able|use|access|permission|commands?)\b", content, re.IGNORECASE)
     )
     if target_id_text and permission_request:
-        if not is_owner(guild, message.author):
-            await message.reply("only the server owner can change who has access to my commands.")
+        if not (is_owner(guild, message.author) or is_superuser(message.author)):
+            await message.reply("only the server owner or a Herald superuser can change who has access to my commands.")
             return True
         target_id = int(target_id_text)
         if target_id == guild.owner_id or target_id == message.author.id:
@@ -676,8 +681,8 @@ def build_command_tree(bot, generate_ai_response):
         app_commands.Choice(name="Full Herald management", value="admin"),
     ])
     async def permissions_grant(interaction: discord.Interaction, user: discord.Member, scope: app_commands.Choice[str]):
-        if interaction.guild is None or not is_owner(interaction.guild, interaction.user):
-            await interaction.response.send_message("only the server owner can grant Herald permissions.", ephemeral=True)
+        if interaction.guild is None or not (is_owner(interaction.guild, interaction.user) or is_superuser(interaction.user)):
+            await interaction.response.send_message("only the server owner or a Herald superuser can grant Herald permissions.", ephemeral=True)
             return
         if user.bot or user.id == interaction.guild.owner_id:
             await interaction.response.send_message("choose a non-bot member other than the server owner.", ephemeral=True)
@@ -693,8 +698,8 @@ def build_command_tree(bot, generate_ai_response):
         app_commands.Choice(name="Full Herald management", value="admin"),
     ])
     async def permissions_revoke(interaction: discord.Interaction, user: discord.Member, scope: app_commands.Choice[str]):
-        if interaction.guild is None or not is_owner(interaction.guild, interaction.user):
-            await interaction.response.send_message("only the server owner can change Herald permissions.", ephemeral=True)
+        if interaction.guild is None or not (is_owner(interaction.guild, interaction.user) or is_superuser(interaction.user)):
+            await interaction.response.send_message("only the server owner or a Herald superuser can change Herald permissions.", ephemeral=True)
             return
         revoke_permission(interaction.guild.id, user.id, scope.value, interaction.user.id)
         await interaction.response.send_message(f"removed {scope.name} access from {user.mention}.", ephemeral=True)
@@ -857,7 +862,9 @@ def build_command_tree(bot, generate_ai_response):
     bot.tree.add_command(root)
 
 
-def install_herald_admin(bot, generate_ai_response):
+def install_herald_admin(bot, generate_ai_response, super_users=None):
+    SUPER_USERS.clear()
+    SUPER_USERS.update(int(user_id) for user_id in (super_users or []))
     load_data()
     if bot.tree.get_command("herald") is None:
         build_command_tree(bot, generate_ai_response)
