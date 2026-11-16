@@ -14,6 +14,7 @@ from flask import Flask, request, jsonify, session
 import discord
 from discord import app_commands
 from discord.ext import commands
+from herald_automation import install_herald_admin, handle_owner_automation_message
 
 app = Flask(__name__)
 app.secret_key = os.getenv("FLASK_SECRET_KEY") or os.urandom(32)
@@ -41,6 +42,7 @@ class HeraldBot(commands.Bot):
 
     async def setup_hook(self):
         try:
+            install_herald_admin(self, generate_ai_response)
             synced = await self.tree.sync()
             print(f"synced {len(synced)} slash commands.")
         except Exception:
@@ -85,7 +87,9 @@ HERALD_SYSTEM_PROMPT = (
     "interactions across conversations, not verbatim transcripts; summaries may be incomplete, so do not invent "
     "details or claim exact recall, and do not expose personal details unnecessarily. "
     "Follow the user's actual request and all applicable instructions consistently; do not forget constraints halfway "
-    "through. Keep answers concise by default, especially when using OpenAI GPT-OSS models."
+    "through. Keep replies very short by default: usually one short sentence or 1–2 brief sentences. "
+    "Only give longer explanations when the user asks or the task genuinely needs them. Avoid filler and repeated conclusions. "
+    "Keep answers concise by default, especially when using OpenAI GPT-OSS models."
 )
 
 LIVE_SEARCH_PATTERN = re.compile(
@@ -827,7 +831,7 @@ def home():
 <head>
 <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Herald Web · v3.0.0</title>
+<title>Herald Web · v4.0.0</title>
 <style type="text/css">
 body {{ background-color: #121212; color: #e0e0e0; font-family: Arial, sans-serif; margin: 0; padding: 10px; }}
 h2 {{ color: #ffffff; margin: 0 0 10px 0; font-size: 18px; }}
@@ -838,7 +842,7 @@ input[type="submit"] {{ padding: 8px 14px; background-color: #0066cc; color: #ff
 </style>
 </head>
 <body>
-<h2>Herald Web Interface <span style="font-size:11px;color:#888888;">v3.0.0</span></h2>
+<h2>Herald Web Interface <span style="font-size:11px;color:#888888;">v4.0.0</span></h2>
 <div class="chat-container">
 {chat_history_rendered}
 </div>
@@ -963,6 +967,9 @@ async def on_message(message):
                     return
 
     await bot.process_commands(message)
+
+    if await handle_owner_automation_message(message, bot, generate_ai_response):
+        return
 
     is_reply_to_herald = False
     if message.reference:
@@ -1214,30 +1221,45 @@ async def ping(interaction: discord.Interaction):
 async def updatelogs(interaction: discord.Interaction):
     embed = discord.Embed(
         title="herald · patch notes",
-        description="v3.0.0 — a smarter, more natural chat experience",
+        description="v4.0.0 — the server assistant update",
         color=discord.Color.from_rgb(32, 32, 32),
     )
     embed.add_field(
-        name="🌐 live web answers",
-        value="when a question needs current information or you ask Herald to search online, he can use live web results and include source citations.",
+        name="💬 more human conversations",
+        value="shorter, more natural replies with less filler and better instruction following.",
         inline=False,
     )
     embed.add_field(
-        name="✍️ shorter, clearer replies",
-        value="answers stay focused and concise, especially for information lookups.",
+        name="⚙️ natural-language automations",
+        value="server owners and authorized managers can describe join, leave, and message-triggered automations in plain English. Herald previews every plan before it can be enabled.",
         inline=False,
     )
     embed.add_field(
-        name="🗣️ more consistent personality",
-        value="Herald keeps his casual conversational style while following your instructions more consistently.",
+        name="👋 welcome and verification setup",
+        value="a guided setup can assign a role to new members and post a welcome message in the channel you choose.",
         inline=False,
     )
     embed.add_field(
-        name="👋 more natural conversations",
-        value="Herald can use Discord display names when it feels natural, without repeating names in every message.",
+        name="🔐 delegated permissions",
+        value="the server owner can grant command, automation, or full-management access to specific members.",
         inline=False,
     )
-    embed.set_footer(text="herald · v3.0.0")
+    embed.add_field(
+        name="🧰 server tools and templates",
+        value="new setup, automation management, status, anti-spam alerts, inactivity alerts, goodbye messages, and scheduled announcements.",
+        inline=False,
+    )
+    embed.add_field(
+        name="🛡️ safer execution",
+        value="automation actions are validated against real server roles, channels, and Herald's permissions. Mass mentions and arbitrary code execution are blocked.",
+        inline=False,
+    )
+    embed.add_field(
+        name="🧾 audit-friendly controls",
+        value="automations can be listed, tested, paused, resumed, or deleted, with confirmation before a new rule is saved.",
+        inline=False,
+    )
+    embed.set_footer(text="herald · v4.0.0")
     await interaction.response.send_message(embed=embed)
 
 
