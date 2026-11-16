@@ -85,6 +85,7 @@ Server administrators can use server-management features, but only the owner can
 
 - `/herald automations list`
 - `/herald automations test`
+- `/herald automations edit` to preview and confirm a replacement plan.
 - `/herald automations pause`
 - `/herald automations resume`
 - `/herald automations delete`
@@ -92,7 +93,7 @@ Server administrators can use server-management features, but only the owner can
 
 Supported natural-language triggers are member joins, member leaves, and messages containing a specified phrase. Supported actions are assigning an existing role to a joining member and sending a message to an existing text channel. Herald does not execute generated code, mass-ban, mass-kick, delete channels, or perform destructive moderation actions.
 
-Ready-made templates are available with `/herald template`:
+Ready-made templates are available with `/herald template`; anti-spam and inactivity alerts can also be disabled from the same command:
 
 - Anti-spam: warns after a burst of messages. It does not automatically delete messages or punish members.
 - Inactivity: posts an alert after the configured number of days without activity. Tracking begins when Herald sees a member join or message.
