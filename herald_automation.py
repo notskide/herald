@@ -422,6 +422,63 @@ def find_automation_from_request(guild, request_text):
     return None
 
 
+async def handle_superuser_direct_message(message, bot):
+    guild = message.guild
+    if guild is None or message.author.bot or not is_superuser(message.author):
+        return False
+    content = message.content or ""
+    if not (bot.user and (bot.user.mentioned_in(message) or "herald" in content.casefold())):
+        return False
+
+    role_match = re.search(
+        r"\b(?:give|add|assign)\s+(?:me|myself)\s+(?:the\s+)?role(?:\s+(?:with\s+)?(?:id|ID))?\s*[:#]?\s*(<@&\d+>|\d{15,22})",
+        content,
+        re.IGNORECASE,
+    )
+    if role_match:
+        try:
+            role = find_role(guild, role_match.group(1))
+            member = guild.get_member(message.author.id)
+            if member is None:
+                member = await guild.fetch_member(message.author.id)
+            if role in member.roles:
+                await message.reply(f"you already have **{role.name}**.")
+                return True
+            await member.add_roles(role, reason=f"Herald direct instruction from superuser {message.author.id}")
+            audit_event(guild.id, message.author.id, "superuser_role_added", f"assigned {role.name} ({role.id}) to {member.id}")
+            await message.reply(f"done, i've given you **{role.name}**.")
+        except (ValueError, discord.Forbidden, discord.HTTPException) as exc:
+            await message.reply(f"i couldn't assign that role: {str(exc)[:500]}")
+        except Exception as exc:
+            await message.reply(f"i couldn't assign that role: {type(exc).__name__}: {str(exc)[:400]}")
+        return True
+
+    role_remove_match = re.search(
+        r"\b(?:remove|take\s+away|strip)\s+(?:the\s+)?role(?:\s+(?:with\s+)?(?:id|ID))?\s*[:#]?\s*(<@&\d+>|\d{15,22})\s+from\s+(?:me|myself)\b",
+        content,
+        re.IGNORECASE,
+    )
+    if role_remove_match:
+        try:
+            role = find_role(guild, role_remove_match.group(1))
+            member = guild.get_member(message.author.id)
+            if member is None:
+                member = await guild.fetch_member(message.author.id)
+            if role not in member.roles:
+                await message.reply(f"you don't have **{role.name}**.")
+                return True
+            await member.remove_roles(role, reason=f"Herald direct instruction from superuser {message.author.id}")
+            audit_event(guild.id, message.author.id, "superuser_role_removed", f"removed {role.name} ({role.id}) from {member.id}")
+            await message.reply(f"done, i've removed **{role.name}** from you.")
+        except (ValueError, discord.Forbidden, discord.HTTPException) as exc:
+            await message.reply(f"i couldn't remove that role: {str(exc)[:500]}")
+        except Exception as exc:
+            await message.reply(f"i couldn't remove that role: {type(exc).__name__}: {str(exc)[:400]}")
+        return True
+
+    return False
+
+
 async def handle_owner_automation_message(message, bot, generate_ai_response):
     guild = message.guild
     if guild is None or message.author.bot:
@@ -451,6 +508,8 @@ async def handle_owner_automation_message(message, bot, generate_ai_response):
             grant_permission(guild.id, target_id, "commands", message.author.id)
             await message.reply(f"<@{target_id}> can now use Herald's delegated server commands.")
         return True
+    if is_superuser(message.author):
+        return False
     if not has_access(guild, message.author, "automation"):
         return False
     cancel_request = bool(re.search(
@@ -473,7 +532,7 @@ async def handle_owner_automation_message(message, bot, generate_ai_response):
         return True
     looks_like_automation = bool(re.search(
         r"\b(automate|automation|make it so|set it up|when .*joins|if .*joins|new member|welcome message|"
-        r"give .*role|assign .*role|when .*leaves|goodbye message)\b",
+        r"when .*leaves|goodbye message)\b",
         content,
         re.IGNORECASE,
     ))
