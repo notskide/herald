@@ -1,16 +1,16 @@
-# herald 4.1.0
+# herald 4.2.0
 
-herald is a casual discord chatbot with server tools, automations, and memory that actually keeps the conversation instead of turning everything into a summary.
+herald is a casual discord bot with server tools, automations, long-term memory, and a social personality. he's meant to be useful, but also someone people can hang out with.
 
-## what's new in 4.1.0
+## what's new in 4.2.0
 
-- herald now saves the original user and herald messages, not ai generated summaries.
-- conversations are sorted into topic based categories, like hosting platforms or programming.
-- each person's private categories stay separate from everyone else's.
-- long categories automatically continue in part 2, part 3, and so on when they reach discord's message limit.
-- there's a separate global archive for information that's useful to everyone and isn't personal.
-- herald can skip saving an exchange when someone asks it not to remember something.
-- basic secret redaction helps keep passwords, api keys, and similar credentials out of memory.
+- herald has a more consistent social personality for casual conversations and community hangouts.
+- he can join lightweight chat games like trivia, riddles, word games, 20 questions, and would-you-rather.
+- recent messages from the same channel give him short-term context, so he can follow ongoing conversations and games.
+- long-term memory is indexed in the background and only relevant categories are loaded for a conversation.
+- memory retrieval no longer scans thousands of discord messages on every reply.
+- all system instructions and memory context are preserved when messages are prepared for the model.
+- the original conversation archive, private categories, shared global archive, and basic secret redaction from 4.1.0 remain.
 
 ## what herald can do
 
