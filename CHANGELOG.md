@@ -1,23 +1,18 @@
 # Changelog
 
-## 4.2.0 — Intelligence and social presence
+## 4.2.0 — Social presence and server control
 
-### Added
-- A consistent social persona designed for casual conversation, community hangouts, and lightweight chat games.
-- Recent same-channel conversation context so Herald can follow ongoing discussions and games across turns.
-- Selective long-term memory retrieval based on the current message, instead of attaching the full archive to every reply.
-- A background memory index built at startup so normal replies no longer scan the memory channel.
-- Relevant private and shared memories are retrieved locally without an extra AI classification request during response generation.
+### Member-facing updates
+- More natural casual conversations and community hangouts.
+- Chat games including trivia, riddles, 20 Questions, word games, and Would You Rather.
+- Better continuity across recent channel conversations and ongoing games.
+- Superuser-directed role assignment and Herald access management.
+- Automatic publication of version notes in Herald's official Discord server, with duplicate-version detection.
 
-### Fixed
-- Preserve and merge all system instruction and memory messages before sending a request to the model. Previously, message cleanup silently discarded every system message after the first.
-- Avoid loading thousands of Discord memory messages on every incoming conversation.
-
-### Notes
-- Herald has a consistent AI character, not literal consciousness or experiences outside the information available to it.
-- Existing memory archives remain in Discord and are indexed in the background after startup.
-
-# Changelog
+### Internal changes
+- Selective long-term memory retrieval and background indexing.
+- Preserve all system instructions and memory context when preparing model requests.
+- Avoid scanning the full memory archive on every reply.
 
 ## 4.1.0 — 2026-11-16
 
