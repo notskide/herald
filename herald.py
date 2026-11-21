@@ -59,6 +59,10 @@ BANNED_USERS_FILE = "banned_users.json"
 DELIVERIES_FILE = "pending_deliveries.json"
 
 MEMORY_CHANNEL_ID = 1537372357075669112
+PATCH_NOTES_GUILD_ID = 1489886240173064252
+PATCH_NOTES_CHANNEL_ID = 1537467920467099721
+PATCH_VERSION = "4.2.0"
+PATCH_NOTES_FOOTER = f"herald · v{PATCH_VERSION}"
 SKIDE_USER_ID = 1380365019153432596
 SUPER_USERS = [1380365019153432596, 1516638561183727648, 1431879700644499549]
 
@@ -232,6 +236,8 @@ pending_deliveries = load_json(DELIVERIES_FILE)
 cooling_down_users = set()
 # Keep references to background memory tasks so the event loop cannot collect them early.
 background_memory_tasks = set()
+patch_notes_publish_lock = asyncio.Lock()
+patch_notes_publish_checked = False
 
 
 def clean_think_tags(text):
@@ -984,9 +990,93 @@ def chat_api():
 
 @bot.event
 async def on_ready():
+    global patch_notes_publish_checked
     print(f"Logged in successfully as {bot.user}")
     if not memory_cache_ready:
         asyncio.create_task(refresh_memory_cache())
+    if not patch_notes_publish_checked:
+        asyncio.create_task(publish_patch_notes_once())
+
+
+def build_patch_notes_embed():
+    embed = discord.Embed(
+        title="herald · what's new",
+        description=f"**version {PATCH_VERSION}**\nsmall upgrades to make hanging out with Herald better.",
+        color=discord.Color.from_rgb(32, 32, 32),
+    )
+    embed.add_field(
+        name="💬 more natural conversations",
+        value="Herald is better at joining in with everyday chats, jokes, and server conversations.",
+        inline=False,
+    )
+    embed.add_field(
+        name="🎮 chat games",
+        value="Play trivia, riddles, 20 Questions, word games, and Would You Rather right in your server.",
+        inline=False,
+    )
+    embed.add_field(
+        name="🧩 follows the conversation",
+        value="Herald can keep up with recent channel discussions and continue simple games across turns.",
+        inline=False,
+    )
+    embed.add_field(
+        name="⚙️ server automations",
+        value="Set up helpful join, leave, and message-triggered actions with a preview before enabling them.",
+        inline=False,
+    )
+    embed.set_footer(text=PATCH_NOTES_FOOTER)
+    return embed
+
+
+async def publish_patch_notes_once():
+    global patch_notes_publish_checked
+    async with patch_notes_publish_lock:
+        if patch_notes_publish_checked:
+            return
+        try:
+            guild = bot.get_guild(PATCH_NOTES_GUILD_ID)
+            if guild is None:
+                try:
+                    guild = await bot.fetch_guild(PATCH_NOTES_GUILD_ID)
+                except discord.HTTPException:
+                    guild = None
+            if guild is None:
+                print(f"[Herald] Patch notes not published: official server {PATCH_NOTES_GUILD_ID} is unavailable.")
+                return
+            channel = bot.get_channel(PATCH_NOTES_CHANNEL_ID)
+            if channel is None:
+                try:
+                    channel = await bot.fetch_channel(PATCH_NOTES_CHANNEL_ID)
+                except discord.HTTPException:
+                    channel = None
+            if channel is None or getattr(channel, "guild", None) is None or channel.guild.id != PATCH_NOTES_GUILD_ID:
+                print(f"[Herald] Patch notes not published: channel {PATCH_NOTES_CHANNEL_ID} is unavailable or belongs to another server.")
+                return
+            if not hasattr(channel, "history") or not hasattr(channel, "send"):
+                print("[Herald] Patch notes not published: configured destination is not a message channel.")
+                return
+            async for sent_message in channel.history(limit=500):
+                if sent_message.author.id != bot.user.id:
+                    continue
+                for existing_embed in sent_message.embeds:
+                    footer = existing_embed.footer.text or ""
+                    description = existing_embed.description or ""
+                    if footer == PATCH_NOTES_FOOTER or (
+                        existing_embed.title == "herald · what's new"
+                        and PATCH_VERSION in description
+                    ):
+                        print(f"[Herald] Patch notes v{PATCH_VERSION} already exist in the official server; skipping.")
+                        patch_notes_publish_checked = True
+                        return
+            await channel.send(embed=build_patch_notes_embed())
+            patch_notes_publish_checked = True
+            print(f"[Herald] Published patch notes v{PATCH_VERSION} to the official server.")
+        except discord.Forbidden:
+            print("[Herald] Patch notes could not be published: missing view-channel or send-message permission.")
+        except discord.HTTPException as exc:
+            print(f"[Herald] Patch notes publication failed: {type(exc).__name__}: {exc}")
+        except Exception as exc:
+            print(f"[Herald] Patch notes publication failed: {type(exc).__name__}: {exc}")
 
 
 async def load_recent_channel_context(message, limit=8):
@@ -1313,48 +1403,7 @@ async def ping(interaction: discord.Interaction):
 
 @bot.tree.command(name="updatelogs", description="view herald's latest patch notes.")
 async def updatelogs(interaction: discord.Interaction):
-    embed = discord.Embed(
-        title="herald · patch notes",
-        description="v4.2.0 — full conversation memory",
-        color=discord.Color.from_rgb(32, 32, 32),
-    )
-    embed.add_field(
-        name="🧠 full conversation memory",
-        value="Herald stores original conversations in private, topic-based categories for each person instead of generating summaries. Long categories continue in numbered parts, and a separate global archive keeps only safe, broadly useful shared information.",
-        inline=False,
-    )
-    embed.add_field(
-        name="⚙️ natural-language automations",
-        value="server owners and authorized managers can describe join, leave, and message-triggered automations in plain English. Herald previews every plan before it can be enabled.",
-        inline=False,
-    )
-    embed.add_field(
-        name="👋 welcome and verification setup",
-        value="a guided setup can assign a role to new members and post a welcome message in the channel you choose.",
-        inline=False,
-    )
-    embed.add_field(
-        name="🔐 delegated permissions",
-        value="the server owner can grant command, automation, or full-management access to specific members.",
-        inline=False,
-    )
-    embed.add_field(
-        name="🧰 server tools and templates",
-        value="new setup, automation management, status, anti-spam alerts, inactivity alerts, goodbye messages, and scheduled announcements.",
-        inline=False,
-    )
-    embed.add_field(
-        name="🛡️ safer execution",
-        value="automation actions are validated against real server roles, channels, and Herald's permissions. Mass mentions and arbitrary code execution are blocked.",
-        inline=False,
-    )
-    embed.add_field(
-        name="🧾 audit history",
-        value="Herald records who granted permissions, created or changed automations, enabled templates, tested rules, and scheduled announcements. Managers can inspect recent entries with /herald audit.",
-        inline=False,
-    )
-    embed.set_footer(text="herald · v4.2.0")
-    await interaction.response.send_message(embed=embed)
+    await interaction.response.send_message(embed=build_patch_notes_embed())
 
 
 @bot.tree.command(name="feedback", description="submit feedback or report a bug.")
