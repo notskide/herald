@@ -10,6 +10,8 @@ herald is a casual discord bot with server tools, automations, long-term memory,
 - long-term memory is indexed in the background and only relevant categories are loaded for a conversation.
 - memory retrieval no longer scans thousands of discord messages on every reply.
 - all system instructions and memory context are preserved when messages are prepared for the model.
+- superusers can directly ask Herald to assign or remove roles and grant or revoke Herald access scopes.
+- Herald automatically publishes the public-facing version notes in its official server once per release.
 - the original conversation archive, private categories, shared global archive, and basic secret redaction from 4.1.0 remain.
 
 ## what herald can do
