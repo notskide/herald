@@ -492,17 +492,16 @@ async def handle_superuser_direct_message(message, bot):
             role_id = trailing_ids[0]
         elif len(all_ids) == 1:
             role_id = all_ids[0]
-    role = None
-    if role_id:
-        role = find_role(guild, role_id)
-    else:
-        role = next((candidate for candidate in sorted(guild.roles, key=lambda item: len(item.name), reverse=True)
-                     if not candidate.is_default() and not candidate.managed and candidate.name.casefold() in lowered), None)
-    if role is None:
-        await message.reply("which role should i use? mention the role, include its name, or send its role ID.")
-        return True
-
     try:
+        role = None
+        if role_id:
+            role = find_role(guild, role_id)
+        else:
+            role = next((candidate for candidate in sorted(guild.roles, key=lambda item: len(item.name), reverse=True)
+                         if not candidate.is_default() and not candidate.managed and candidate.name.casefold() in lowered), None)
+        if role is None:
+            await message.reply("which role should i use? mention the role, include its name, or send its role ID.")
+            return True
         member = guild.get_member(target_id)
         if member is None:
             member = await guild.fetch_member(target_id)
