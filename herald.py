@@ -507,7 +507,7 @@ async def load_memory(user_id, query_text=""):
     if not memory_cache_ready:
         return []
     explicit_recall = bool(re.search(
-        r"\\b(remember|recall|last time|previously|earlier|before|what did i say|what were we|we talked about)\\b",
+        r"\b(remember|recall|last time|previously|earlier|before|what did i say|what were we|we talked about)\b",
         str(query_text or ""),
         re.IGNORECASE,
     ))
@@ -607,6 +607,7 @@ class SettingsView(discord.ui.View):
 MAX_GROQ_INPUT_CHARS = 24000
 MAX_GROQ_MESSAGES = 24
 MAX_GROQ_MESSAGE_CHARS = 6000
+MAX_GROQ_SYSTEM_CHARS = 14000
 MAX_GROQ_IMAGES_PER_MESSAGE = 3
 
 
@@ -648,9 +649,10 @@ def sanitize_messages(messages):
         else:
             content_str = str(content).strip()
             if content_str:
+                max_chars = MAX_GROQ_SYSTEM_CHARS if role == "system" else MAX_GROQ_MESSAGE_CHARS
                 normalized.append({
                     "role": role,
-                    "content": content_str[:MAX_GROQ_MESSAGE_CHARS],
+                    "content": content_str[:max_chars],
                 })
 
     if not normalized:
@@ -987,7 +989,6 @@ async def on_ready():
         asyncio.create_task(refresh_memory_cache())
 
 
-@bot.event
 async def load_recent_channel_context(message, limit=8):
     recent = []
     try:
