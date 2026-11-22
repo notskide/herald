@@ -947,7 +947,7 @@ def home():
 <head>
 <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Herald Web · v4.2.0</title>
+<title>Herald Web · v4.3.0</title>
 <style type="text/css">
 body {{ background-color: #121212; color: #e0e0e0; font-family: Arial, sans-serif; margin: 0; padding: 10px; }}
 h2 {{ color: #ffffff; margin: 0 0 10px 0; font-size: 18px; }}
@@ -958,7 +958,7 @@ input[type="submit"] {{ padding: 8px 14px; background-color: #0066cc; color: #ff
 </style>
 </head>
 <body>
-<h2>Herald Web Interface <span style="font-size:11px;color:#888888;">v4.2.0</span></h2>
+<h2>Herald Web Interface <span style="font-size:11px;color:#888888;">v4.3.0</span></h2>
 <div class="chat-container">
 {chat_history_rendered}
 </div>
