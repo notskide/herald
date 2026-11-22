@@ -423,6 +423,26 @@ def find_automation_from_request(guild, request_text):
     return None
 
 
+async def update_role_permission(guild, role, permission_name, enabled, reason):
+    updated = role.permissions
+    setattr(updated, permission_name, enabled)
+    await role.edit(permissions=updated, reason=reason)
+    failed_channels = []
+    changed_channels = 0
+    if permission_name == "manage_messages":
+        opposite = not enabled
+        for channel in guild.channels:
+            try:
+                overwrite = channel.overwrites_for(role)
+                if overwrite.manage_messages is opposite:
+                    overwrite.manage_messages = None
+                    await channel.set_permissions(role, overwrite=overwrite, reason=reason)
+                    changed_channels += 1
+            except (discord.Forbidden, discord.HTTPException):
+                failed_channels.append(channel.name)
+    return changed_channels, failed_channels
+
+
 async def handle_superuser_direct_message(message, bot):
     guild = message.guild
     actor = message.author
@@ -484,13 +504,21 @@ async def handle_superuser_direct_message(message, bot):
             re.search(r"\b(remove|revoke|disable|deny|disallow)\b", content, re.IGNORECASE)
             or re.search(r"\bnot\s+(?:be\s+)?able\s+to\b", content, re.IGNORECASE)
         )
-        permissions = role.permissions
-        setattr(permissions, permission_name, not revoke)
         try:
-            await role.edit(permissions=permissions, reason=f"Herald role permission change requested by owner/superuser {actor.id}")
+            changed_channels, failed_channels = await update_role_permission(
+                guild,
+                role,
+                permission_name,
+                not revoke,
+                f"Herald role permission change requested by owner/superuser {actor.id}",
+            )
             audit_event(guild.id, actor.id, "role_permission_changed", f"{role.name} ({role.id}): {permission_name}={'off' if revoke else 'on'}")
             state = "removed" if revoke else "enabled"
-            extra = " Channel-specific denies can still override this server-wide role permission." if permission_name == "manage_messages" else ""
+            extra = ""
+            if permission_name == "manage_messages":
+                extra = f" cleared {changed_channels} channel override(s) so the role setting applies consistently."
+                if failed_channels:
+                    extra += " i couldn't update overrides in: " + ", ".join(failed_channels[:8]) + "."
             await message.reply(f"done. **{permission_name.replace('_', ' ')}** is now {state} for **{role.name}**.{extra}")
         except (discord.Forbidden, discord.HTTPException) as exc:
             await message.reply(f"discord wouldn't let me edit that role: {str(exc)[:450]}")
@@ -1232,12 +1260,21 @@ def build_command_tree(bot, generate_ai_response):
             await interaction.response.send_message(f"my highest role must be above **{role.name}**.", ephemeral=True)
             return
         try:
-            updated = role.permissions
-            setattr(updated, permission.value, enabled)
-            await role.edit(permissions=updated, reason=f"Herald role permission change requested by {interaction.user.id}")
+            changed_channels, failed_channels = await update_role_permission(
+                guild,
+                role,
+                permission.value,
+                enabled,
+                f"Herald role permission change requested by {interaction.user.id}",
+            )
             audit_event(guild.id, interaction.user.id, "role_permission_changed", f"{role.name} ({role.id}): {permission.value}={'on' if enabled else 'off'}")
+            extra = ""
+            if permission.value == "manage_messages":
+                extra = f" cleared {changed_channels} channel override(s)."
+                if failed_channels:
+                    extra += " failed to update: " + ", ".join(failed_channels[:8]) + "."
             await interaction.response.send_message(
-                f"done. **{permission.name}** is now {'enabled' if enabled else 'disabled'} for **{role.name}**.",
+                f"done. **{permission.name}** is now {'enabled' if enabled else 'disabled'} for **{role.name}**.{extra}",
                 ephemeral=True,
             )
         except (discord.Forbidden, discord.HTTPException) as exc:
