@@ -1129,7 +1129,7 @@ def build_command_tree(bot, generate_ai_response):
         embed.add_field(name="Manage Roles", value="available" if permissions and permissions.manage_roles else "missing", inline=True)
         embed.add_field(name="View Channels", value="available" if permissions and permissions.view_channel else "missing", inline=True)
         embed.add_field(name="Send Messages", value="available" if permissions and permissions.send_messages else "missing", inline=True)
-        embed.set_footer(text="Herald 4.0.0")
+        embed.set_footer(text="Herald 4.3.0")
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
     @root.command(name="command", description="Use a delegated, non-destructive Herald command")
