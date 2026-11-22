@@ -820,11 +820,56 @@ async def start_maintenance(bot):
         bot._herald_maintenance_task = asyncio.create_task(maintenance_loop(bot))
 
 
+class TriviaView(discord.ui.View):
+    def __init__(self, question):
+        super().__init__(timeout=90)
+        self.question = question
+        for index, option in enumerate(question["options"]):
+            button = discord.ui.Button(label=option, style=discord.ButtonStyle.secondary)
+            async def choose(interaction, selected=index):
+                if selected == self.question["answer"]:
+                    for child in self.children:
+                        child.disabled = True
+                    await interaction.response.edit_message(
+                        content=f"correct, {interaction.user.mention}! {self.question['explanation']}",
+                        view=self,
+                    )
+                    self.stop()
+                else:
+                    await interaction.response.send_message("not quite, try another option :>", ephemeral=True)
+            button.callback = choose
+            self.add_item(button)
+
+
+class RiddleView(discord.ui.View):
+    def __init__(self, answer):
+        super().__init__(timeout=120)
+        self.answer = answer
+
+    @discord.ui.button(label="reveal answer", style=discord.ButtonStyle.secondary)
+    async def reveal(self, interaction, button):
+        button.disabled = True
+        await interaction.response.edit_message(content=f"the answer is **{self.answer}**.", view=self)
+
+
+class WouldYouRatherView(discord.ui.View):
+    def __init__(self, first, second):
+        super().__init__(timeout=120)
+        for label in (first, second):
+            button = discord.ui.Button(label=label[:80], style=discord.ButtonStyle.primary)
+            async def choose(interaction, selected=label):
+                await interaction.response.send_message(f"{interaction.user.mention} chose **{selected}**.")
+            button.callback = choose
+            self.add_item(button)
+
+
 def build_command_tree(bot, generate_ai_response):
     root = app_commands.Group(name="herald", description="Herald server assistant and automation tools")
     automate_group = app_commands.Group(name="automate", description="Create automations from plain English")
     automations_group = app_commands.Group(name="automations", description="Manage this server's automations")
     permissions_group = app_commands.Group(name="permissions", description="Manage delegated Herald access")
+    game_group = app_commands.Group(name="game", description="Play quick games with Herald")
+    role_permissions_group = app_commands.Group(name="role-permissions", description="Manage Discord role permissions")
 
     @root.command(name="setup", description="Open the guided welcome and verification setup")
     async def setup(interaction: discord.Interaction):
@@ -1109,9 +1154,100 @@ def build_command_tree(bot, generate_ai_response):
             lines = [f"{item['id']} · {item['name']} · {'on' if item.get('enabled') else 'paused'}" for item in items[:20]]
             await interaction.response.send_message("\n".join(lines) if lines else "no automations are configured.", ephemeral=True)
 
+    trivia_questions = [
+        {"question": "Which planet has the most prominent ring system?", "options": ["Mars", "Saturn", "Venus", "Mercury"], "answer": 1, "explanation": "Saturn's rings are the most prominent in our solar system."},
+        {"question": "What is the largest ocean on Earth?", "options": ["Atlantic", "Indian", "Pacific", "Arctic"], "answer": 2, "explanation": "The Pacific Ocean is the largest."},
+        {"question": "Which language is primarily used to style web pages?", "options": ["HTML", "CSS", "SQL", "Bash"], "answer": 1, "explanation": "CSS controls the presentation and layout of web pages."},
+        {"question": "What is the chemical symbol for gold?", "options": ["Ag", "Gd", "Au", "Go"], "answer": 2, "explanation": "Gold's chemical symbol is Au."},
+        {"question": "How many sides does a hexagon have?", "options": ["5", "6", "7", "8"], "answer": 1, "explanation": "A hexagon has six sides."},
+    ]
+    riddles = [
+        ("i have keys but no locks, space but no room, and you can enter but not go inside. what am i?", "a keyboard"),
+        ("the more you take, the more you leave behind. what am i?", "footsteps"),
+        ("what has a face and two hands but no arms or legs?", "a clock"),
+        ("what gets wetter the more it dries?", "a towel"),
+    ]
+    choices = [
+        ("be able to fly anywhere", "be able to breathe underwater"),
+        ("explore space for a week", "explore the deepest ocean for a week"),
+        ("have a pause button for time", "have a rewind button for time"),
+        ("live in a giant treehouse", "live in an underwater house"),
+    ]
+
+    @game_group.command(name="trivia", description="Start a quick multiple-choice trivia question")
+    async def game_trivia(interaction: discord.Interaction):
+        question = random.choice(trivia_questions)
+        embed = discord.Embed(title="herald · trivia", description=question["question"], color=discord.Color.blurple())
+        await interaction.response.send_message(embed=embed, view=TriviaView(question))
+
+    @game_group.command(name="riddle", description="Get a riddle and reveal its answer when ready")
+    async def game_riddle(interaction: discord.Interaction):
+        prompt, answer = random.choice(riddles)
+        embed = discord.Embed(title="herald · riddle", description=prompt, color=discord.Color.blurple())
+        await interaction.response.send_message(embed=embed, view=RiddleView(answer))
+
+    @game_group.command(name="would-you-rather", description="Start a quick Would You Rather")
+    async def game_would_you_rather(interaction: discord.Interaction):
+        first, second = random.choice(choices)
+        embed = discord.Embed(title="herald · would you rather", description=f"**A:** {first}\n\n**B:** {second}\n\npick one below.", color=discord.Color.blurple())
+        await interaction.response.send_message(embed=embed, view=WouldYouRatherView(first, second))
+
+    role_permission_choices = [
+        app_commands.Choice(name="Manage Messages", value="manage_messages"),
+        app_commands.Choice(name="Manage Channels", value="manage_channels"),
+        app_commands.Choice(name="Manage Roles", value="manage_roles"),
+        app_commands.Choice(name="Manage Webhooks", value="manage_webhooks"),
+        app_commands.Choice(name="Manage Threads", value="manage_threads"),
+        app_commands.Choice(name="Manage Nicknames", value="manage_nicknames"),
+        app_commands.Choice(name="View Audit Log", value="view_audit_log"),
+        app_commands.Choice(name="Moderate Members", value="moderate_members"),
+        app_commands.Choice(name="Kick Members", value="kick_members"),
+        app_commands.Choice(name="Ban Members", value="ban_members"),
+        app_commands.Choice(name="Manage Events", value="manage_events"),
+        app_commands.Choice(name="Manage Server", value="manage_guild"),
+        app_commands.Choice(name="Administrator", value="administrator"),
+    ]
+
+    @role_permissions_group.command(name="set", description="Enable or disable a permission for a role")
+    @app_commands.describe(role="The role to edit", permission="The Discord permission", enabled="Whether the permission should be enabled")
+    @app_commands.choices(permission=role_permission_choices)
+    async def role_permission_set(
+        interaction: discord.Interaction,
+        role: discord.Role,
+        permission: app_commands.Choice[str],
+        enabled: bool,
+    ):
+        guild = interaction.guild
+        if guild is None or not (is_owner(guild, interaction.user) or is_superuser(interaction.user)):
+            await interaction.response.send_message("only the server owner or a Herald superuser can edit role permissions.", ephemeral=True)
+            return
+        me = guild.me
+        if role.is_default() or role.managed:
+            await interaction.response.send_message("that role is managed by Discord or is the @everyone role, so i can't edit it here.", ephemeral=True)
+            return
+        if me is None or not me.guild_permissions.manage_roles:
+            await interaction.response.send_message("i need the Manage Roles permission to edit role permissions.", ephemeral=True)
+            return
+        if role >= me.top_role:
+            await interaction.response.send_message(f"my highest role must be above **{role.name}**.", ephemeral=True)
+            return
+        try:
+            updated = role.permissions
+            setattr(updated, permission.value, enabled)
+            await role.edit(permissions=updated, reason=f"Herald role permission change requested by {interaction.user.id}")
+            audit_event(guild.id, interaction.user.id, "role_permission_changed", f"{role.name} ({role.id}): {permission.value}={'on' if enabled else 'off'}")
+            await interaction.response.send_message(
+                f"done. **{permission.name}** is now {'enabled' if enabled else 'disabled'} for **{role.name}**.",
+                ephemeral=True,
+            )
+        except (discord.Forbidden, discord.HTTPException) as exc:
+            await interaction.response.send_message(f"discord wouldn't let me edit that role: {str(exc)[:450]}", ephemeral=True)
+
     root.add_command(automate_group)
     root.add_command(automations_group)
     root.add_command(permissions_group)
+    root.add_command(game_group)
+    root.add_command(role_permissions_group)
     bot.tree.add_command(root)
 
 
