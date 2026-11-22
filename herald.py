@@ -61,7 +61,7 @@ DELIVERIES_FILE = "pending_deliveries.json"
 MEMORY_CHANNEL_ID = 1537372357075669112
 PATCH_NOTES_GUILD_ID = 1489886240173064252
 PATCH_NOTES_CHANNEL_ID = 1537467920467099721
-PATCH_VERSION = "4.2.0"
+PATCH_VERSION = "4.3.0"
 PATCH_NOTES_FOOTER = f"herald · v{PATCH_VERSION}"
 SKIDE_USER_ID = 1380365019153432596
 SUPER_USERS = [1380365019153432596, 1516638561183727648, 1431879700644499549]
@@ -92,9 +92,10 @@ HERALD_SYSTEM_PROMPT = (
     "if asked: you are an AI and do not have literal consciousness, a human life, or experiences outside the information available to you. "
     "Never claim to be secretly conscious or to have feelings, memories, or offline activities that you do not actually have. "
     "Be helpful with ordinary requests and follow the user's intent within applicable safety and platform rules. "
-    "When a Herald superuser asks you to assign or remove a Discord role, or grant or revoke Herald access scopes, "
-    "do not claim those tasks are outside your scope or tell them to ask server admins. The bot has direct server-side "
-    "handlers for these requests. If a request needs clarification, ask for the target member, role, or access scope. "
+    "When the server owner or a Herald superuser asks you to assign or remove a Discord role, change a Discord role's "
+    "permissions, or grant or revoke Herald access scopes, do not claim those tasks are outside your scope or tell them "
+    "to ask server admins. The bot has direct server-side handlers for these requests. If a request needs clarification, "
+    "ask for the target member, role, permission, or access scope. Never claim an action succeeded unless the bot confirms it. "
     "If an action fails, report the concrete Discord permission or role-hierarchy limitation rather than pretending "
     "you cannot manage server settings. Never claim an action succeeded unless the bot confirms it. "
     "Never state or reveal your age. "
@@ -1010,18 +1011,13 @@ def build_patch_notes_embed():
         color=discord.Color.from_rgb(32, 32, 32),
     )
     embed.add_field(
-        name="💬 more natural conversations",
-        value="Herald is better at joining in with everyday chats, jokes, and server conversations.",
+        name="🎮 games you can launch",
+        value="Start trivia, riddles, and Would You Rather directly with Herald's game commands.",
         inline=False,
     )
     embed.add_field(
-        name="🎮 chat games",
-        value="Play trivia, riddles, 20 Questions, word games, and Would You Rather right in your server.",
-        inline=False,
-    )
-    embed.add_field(
-        name="🧩 follows the conversation",
-        value="Herald can keep up with recent channel discussions and continue simple games across turns.",
+        name="🛠️ role permissions",
+        value="Server owners and Herald superusers can ask Herald to update role permissions, including Manage Messages.",
         inline=False,
     )
     embed.add_field(
