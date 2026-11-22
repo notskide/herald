@@ -4,6 +4,7 @@ import os
 import re
 import time
 import uuid
+import random
 from collections import defaultdict, deque
 from datetime import datetime, timezone
 
@@ -424,28 +425,92 @@ def find_automation_from_request(guild, request_text):
 
 async def handle_superuser_direct_message(message, bot):
     guild = message.guild
-    if guild is None or message.author.bot or not is_superuser(message.author):
+    actor = message.author
+    if guild is None or actor.bot or not (is_superuser(actor) or is_owner(guild, actor)):
         return False
 
     content = re.sub(r"[\x60*_~]", "", message.content or "").strip()
     lowered = content.casefold()
-    add_request = bool(re.search(r"\b(?:give|add|assign|grant)\b", content, re.IGNORECASE))
+    role_permission_intent = bool(
+        re.search(r"\b(role|roles)\b|<@&\d+>", content, re.IGNORECASE)
+        and re.search(r"\b(permission|permissions|able to|allow|deny|manage|delete|moderate)\b", content, re.IGNORECASE)
+    )
+    if role_permission_intent:
+        role_match = re.search(r"<@&(\d+)>", content) or re.search(
+            r"\brole(?:\s+(?:with\s+)?id)?\s*[:#]?\s*(\d{15,22})", content, re.IGNORECASE
+        )
+        role_id = role_match.group(1) if role_match else None
+        if role_id is None:
+            ids = re.findall(r"(?<!\d)(\d{15,22})(?!\d)", content)
+            role_id = ids[0] if len(ids) == 1 else None
+        if role_id is None:
+            await message.reply("which role should i update? mention it or include its role ID.")
+            return True
+
+        permission_patterns = [
+            ("manage_messages", r"\b(manage|delete|remove|moderate)\b.{0,45}\b(messages?|chat)\b|\b(messages?|chat)\b.{0,45}\b(manage|delete|remove|moderate)\b"),
+            ("manage_channels", r"\b(manage|edit|create|delete)\b.{0,35}\bchannels?\b"),
+            ("manage_roles", r"\b(manage|edit|create|delete)\b.{0,35}\broles?\b"),
+            ("manage_webhooks", r"\bmanage\b.{0,25}\bwebhooks?\b"),
+            ("manage_threads", r"\bmanage\b.{0,25}\bthreads?\b"),
+            ("manage_nicknames", r"\bmanage\b.{0,25}\bnicknames?\b"),
+            ("view_audit_log", r"\b(view|see|access)\b.{0,25}\baudit\s*logs?\b"),
+            ("moderate_members", r"\b(timeout|moderate)\b.{0,25}\bmembers?\b"),
+            ("kick_members", r"\bkick\b.{0,25}\bmembers?\b"),
+            ("ban_members", r"\bban\b.{0,25}\bmembers?\b"),
+            ("manage_events", r"\bmanage\b.{0,25}\bevents?\b"),
+            ("manage_guild", r"\bmanage\b.{0,25}\b(server|guild)\b"),
+            ("administrator", r"\badministrator\b|\badmin permissions?\b"),
+        ]
+        permission_name = next((name for name, pattern in permission_patterns if re.search(pattern, content, re.IGNORECASE)), None)
+        if permission_name is None and re.search(r"\bmessages?\b", content, re.IGNORECASE):
+            permission_name = "manage_messages"
+        if permission_name is None:
+            await message.reply("which permission should i change? for example: manage messages, manage channels, or manage roles.")
+            return True
+
+        role = guild.get_role(int(role_id))
+        if role is None or role.is_default() or role.managed:
+            await message.reply("i couldn't find a normal, editable role with that ID.")
+            return True
+        me = guild.me
+        if me is None or not me.guild_permissions.manage_roles:
+            await message.reply("i need the **Manage Roles** permission to edit role permissions.")
+            return True
+        if role >= me.top_role:
+            await message.reply(f"my highest role needs to be above **{role.name}** before i can edit it.")
+            return True
+        revoke = bool(
+            re.search(r"\b(remove|revoke|disable|deny|disallow)\b", content, re.IGNORECASE)
+            or re.search(r"\bnot\s+(?:be\s+)?able\s+to\b", content, re.IGNORECASE)
+        )
+        permissions = role.permissions
+        setattr(permissions, permission_name, not revoke)
+        try:
+            await role.edit(permissions=permissions, reason=f"Herald role permission change requested by owner/superuser {actor.id}")
+            audit_event(guild.id, actor.id, "role_permission_changed", f"{role.name} ({role.id}): {permission_name}={'off' if revoke else 'on'}")
+            state = "removed" if revoke else "enabled"
+            extra = " Channel-specific denies can still override this server-wide role permission." if permission_name == "manage_messages" else ""
+            await message.reply(f"done. **{permission_name.replace('_', ' ')}** is now {state} for **{role.name}**.{extra}")
+        except (discord.Forbidden, discord.HTTPException) as exc:
+            await message.reply(f"discord wouldn't let me edit that role: {str(exc)[:450]}")
+        return True
+
+    add_request = bool(re.search(r"\b(?:give|add|assign|grant|let|allow|enable)\b", content, re.IGNORECASE))
     remove_request = bool(re.search(r"\b(?:remove|take\s+away|strip|revoke)\b", content, re.IGNORECASE))
     if not (add_request or remove_request):
         return False
-
     is_permission_request = bool(
         re.search(r"\b(?:permission|permissions|access)\b", content, re.IGNORECASE)
         and re.search(r"\b(?:commands?|automation|automations|admin|management|manage)\b", content, re.IGNORECASE)
     )
     is_role_request = bool(re.search(r"\brole\b|<@&\d+>", content, re.IGNORECASE))
-
     user_mention = re.search(r"<@!?(\d+)>", content)
     target_id = int(user_mention.group(1)) if user_mention else None
     if target_id == getattr(bot.user, "id", None):
         target_id = None
     if target_id is None and re.search(r"\b(?:me|myself|my account)\b", content, re.IGNORECASE):
-        target_id = message.author.id
+        target_id = actor.id
     if target_id is None:
         numeric_ids = re.findall(r"(?<!\d)(\d{15,22})(?!\d)", content)
         role_mention = re.search(r"<@&(\d+)>", content)
@@ -453,71 +518,57 @@ async def handle_superuser_direct_message(message, bot):
             numeric_ids = [item for item in numeric_ids if item != role_mention.group(1)]
         if is_permission_request and len(numeric_ids) == 1:
             target_id = int(numeric_ids[0])
-
     if is_permission_request and target_id is not None:
-        scope = "admin" if re.search(r"\b(?:full management|admin|administrator)\b", content, re.IGNORECASE) else (
-            "automation" if re.search(r"\bautomations?\b", content, re.IGNORECASE) else "commands"
-        )
+        scope = "admin" if re.search(r"\b(?:full management|admin|administrator)\b", content, re.IGNORECASE) else ("automation" if re.search(r"\bautomations?\b", content, re.IGNORECASE) else "commands")
         try:
-            target = guild.get_member(target_id)
-            if target is None:
-                target = await guild.fetch_member(target_id)
+            target = guild.get_member(target_id) or await guild.fetch_member(target_id)
             if target.id == guild.owner_id:
                 await message.reply("the server owner already has full access.")
                 return True
             if add_request:
-                grant_permission(guild.id, target.id, scope, message.author.id)
+                grant_permission(guild.id, target.id, scope, actor.id)
                 await message.reply(f"done, <@{target.id}> now has Herald {scope} access.")
             else:
-                revoke_permission(guild.id, target.id, scope, message.author.id)
+                revoke_permission(guild.id, target.id, scope, actor.id)
                 await message.reply(f"done, removed Herald {scope} access from <@{target.id}>.")
         except (discord.NotFound, discord.Forbidden, discord.HTTPException) as exc:
             await message.reply(f"i couldn't update that access: {str(exc)[:400]}")
         return True
-
     if not is_role_request:
         return False
     if target_id is None:
         await message.reply("who should receive the role? mention them, use their user ID, or say 'me'.")
         return True
-
     role_mention = re.search(r"<@&(\d+)>", content)
     role_id = role_mention.group(1) if role_mention else None
     if role_id is None:
         role_position = re.search(r"\brole\b", content, re.IGNORECASE)
         trailing_ids = re.findall(r"(?<!\d)(\d{15,22})(?!\d)", content[role_position.end():]) if role_position else []
-        all_ids = re.findall(r"(?<!\d)(\d{15,22})(?!\d)", content)
-        all_ids = [item for item in all_ids if item != str(target_id)]
-        if len(trailing_ids) == 1:
-            role_id = trailing_ids[0]
-        elif len(all_ids) == 1:
-            role_id = all_ids[0]
+        all_ids = [item for item in re.findall(r"(?<!\d)(\d{15,22})(?!\d)", content) if item != str(target_id)]
+        role_id = trailing_ids[0] if len(trailing_ids) == 1 else (all_ids[0] if len(all_ids) == 1 else None)
     try:
-        role = None
-        if role_id:
-            role = find_role(guild, role_id)
-        else:
-            role = next((candidate for candidate in sorted(guild.roles, key=lambda item: len(item.name), reverse=True)
-                         if not candidate.is_default() and not candidate.managed and candidate.name.casefold() in lowered), None)
+        role = find_role(guild, role_id) if role_id else next(
+            (candidate for candidate in sorted(guild.roles, key=lambda item: len(item.name), reverse=True)
+             if not candidate.is_default() and not candidate.managed and candidate.name.casefold() in lowered),
+            None,
+        )
         if role is None:
             await message.reply("which role should i use? mention the role, include its name, or send its role ID.")
             return True
-        member = guild.get_member(target_id)
-        if member is None:
-            member = await guild.fetch_member(target_id)
+        member = guild.get_member(target_id) or await guild.fetch_member(target_id)
         if add_request:
             if role in member.roles:
                 await message.reply(f"<@{member.id}> already has **{role.name}**.")
                 return True
-            await member.add_roles(role, reason=f"Herald direct instruction from superuser {message.author.id}")
-            audit_event(guild.id, message.author.id, "superuser_role_added", f"assigned {role.name} ({role.id}) to {member.id}")
+            await member.add_roles(role, reason=f"Herald direct instruction from owner/superuser {actor.id}")
+            audit_event(guild.id, actor.id, "superuser_role_added", f"assigned {role.name} ({role.id}) to {member.id}")
             await message.reply(f"done, gave **{role.name}** to <@{member.id}>.")
         else:
             if role not in member.roles:
                 await message.reply(f"<@{member.id}> doesn't have **{role.name}**.")
                 return True
-            await member.remove_roles(role, reason=f"Herald direct instruction from superuser {message.author.id}")
-            audit_event(guild.id, message.author.id, "superuser_role_removed", f"removed {role.name} ({role.id}) from {member.id}")
+            await member.remove_roles(role, reason=f"Herald direct instruction from owner/superuser {actor.id}")
+            audit_event(guild.id, actor.id, "superuser_role_removed", f"removed {role.name} ({role.id}) from {member.id}")
             await message.reply(f"done, removed **{role.name}** from <@{member.id}>.")
     except (ValueError, discord.Forbidden, discord.HTTPException) as exc:
         action = "assign" if add_request else "remove"
@@ -526,7 +577,6 @@ async def handle_superuser_direct_message(message, bot):
         action = "assign" if add_request else "remove"
         await message.reply(f"i couldn't {action} that role: {type(exc).__name__}: {str(exc)[:400]}")
     return True
-
 
 async def handle_owner_automation_message(message, bot, generate_ai_response):
     guild = message.guild
