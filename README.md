@@ -1,18 +1,14 @@
-# herald 4.2.0
+# herald 4.3.0
 
 herald is a casual discord bot with server tools, automations, long-term memory, and a social personality. he's meant to be useful, but also someone people can hang out with.
 
-## what's new in 4.2.0
+## what's new in 4.3.0
 
-- herald has a more consistent social personality for casual conversations and community hangouts.
-- he can join lightweight chat games like trivia, riddles, word games, 20 questions, and would-you-rather.
-- recent messages from the same channel give him short-term context, so he can follow ongoing conversations and games.
-- long-term memory is indexed in the background and only relevant categories are loaded for a conversation.
-- memory retrieval no longer scans thousands of discord messages on every reply.
-- all system instructions and memory context are preserved when messages are prepared for the model.
-- superusers can directly ask Herald to assign or remove roles and grant or revoke Herald access scopes.
-- Herald automatically publishes the public-facing version notes in its official server once per release.
-- the original conversation archive, private categories, shared global archive, and basic secret redaction from 4.1.0 remain.
+- play trivia, riddles, and would-you-rather through /herald game commands.
+- server owners and herald superusers can ask herald to change discord role permissions.
+- role permission changes are also available through /herald role-permissions set.
+- herald publishes the public-facing patch notes in its official server once per release.
+- the social chat, automations, and selective memory features from 4.2.0 remain.
 
 ## what herald can do
 
@@ -22,6 +18,8 @@ herald is a casual discord bot with server tools, automations, long-term memory,
 - assign roles and send messages to channels through approved automations.
 - guide server owners through welcome and verification setup.
 - manage delegated permissions for commands, automations, and full herald management.
+- launch trivia, riddles, and would-you-rather with /herald game.
+- let the server owner or a Herald superuser update supported Discord role permissions.
 - provide anti spam alerts, inactivity alerts, goodbye messages, and scheduled announcements.
 - keep an audit history of important server configuration changes.
 
@@ -116,7 +114,7 @@ use these commands to manage automations:
 
 right now, natural language automations support member joins, member leaves, and messages containing a specific phrase. actions can assign an existing role to a joining member or send a message to an existing text channel.
 
-herald doesn't run generated code, mass ban or kick members, delete channels, or perform destructive moderation actions.
+herald doesn't run generated code, mass ban or kick members, delete channels, or perform destructive moderation actions. Role permission editing is restricted to the server owner and configured Herald superusers; Discord still enforces Herald's Manage Roles permission and role hierarchy.
 
 ## templates and schedules
 
