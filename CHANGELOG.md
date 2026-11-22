@@ -1,5 +1,16 @@
 # Changelog
 
+## 4.3.0 — Games and role permissions
+
+### Member-facing updates
+- Added /herald game trivia, /herald game riddle, and /herald game would-you-rather with interactive Discord buttons.
+- Server owners and configured Herald superusers can update Discord role permissions through direct natural-language requests or /herald role-permissions set.
+- Added direct handling for requests such as enabling Manage Messages for a specified role.
+- Public patch notes are published automatically to Herald's official server once per version, with duplicate detection.
+
+### Internal changes
+- Patch notes describe member-facing features only; internal memory and bug-fix details are excluded from the public embed.
+
 ## 4.2.0 — Social presence and server control
 
 ### Member-facing updates
