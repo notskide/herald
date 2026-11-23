@@ -1213,10 +1213,30 @@ async def on_message(message):
     is_about_herald = "herald" in message.content.lower()
     is_dm = isinstance(message.channel, discord.DMChannel)
 
+    addressed_targets = []
+    if message.guild:
+        mentioned_ids = {member.id for member in message.mentions}
+        for member in message.guild.members:
+            if member.id == getattr(bot.user, "id", None):
+                continue
+            display_name = str(member.display_name or "").strip()
+            username = str(member.name or "").strip()
+            if member.id in mentioned_ids:
+                addressed_targets.append(display_name or username)
+                continue
+            for candidate in {display_name, username}:
+                if len(candidate) < 3:
+                    continue
+                if re.search(rf"(?<![\\w]){re.escape(candidate)}(?![\\w])", message.content, re.IGNORECASE):
+                    addressed_targets.append(display_name or username)
+                    break
+
+    is_addressed_to_other = bool(addressed_targets)
+
     if message.author.bot and not (is_mentioned or is_reply_to_herald):
         return
 
-    if not (is_reply_to_herald or is_mentioned or is_about_herald or is_dm):
+    if not (is_reply_to_herald or is_mentioned or is_about_herald or is_dm or is_addressed_to_other):
         return
 
     if message.mentions and message.guild:
@@ -1271,10 +1291,20 @@ async def on_message(message):
             save_json(DELIVERIES_FILE, pending_deliveries)
 
         display_name = str(getattr(message.author, "display_name", message.author.name))
+        target_context = ""
+        if addressed_targets:
+            unique_targets = list(dict.fromkeys(name for name in addressed_targets if name))
+            target_context = (
+                "\\nThe user is addressing or mentioning: " + ", ".join(unique_targets[:8]) +
+                ". Join the conversation naturally and speak to the mentioned person or bot when appropriate. " +
+                "Do not assume they are human; treat them as a normal conversation participant. " +
+                "Do not claim to have sent them a separate message; your reply in this channel is the response."
+            )
+
         system_instruction = (
             HERALD_SYSTEM_PROMPT
-            + f"\nCurrent user's Discord display name: {display_name}. Use it only when it feels natural and useful."
-            + fam_context + delivery_prompt
+            + f"\\nCurrent user's Discord display name: {display_name}. Use it only when it feels natural and useful."
+            + target_context + fam_context + delivery_prompt
         )
 
         formatted_history = [{"role": "system", "content": system_instruction}]
