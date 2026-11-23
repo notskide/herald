@@ -1227,7 +1227,7 @@ async def on_message(message):
             for candidate in {display_name, username}:
                 if len(candidate) < 3:
                     continue
-                if re.search(rf"(?<![\\w]){re.escape(candidate)}(?![\\w])", message.content, re.IGNORECASE):
+                if re.search(rf"(?<![\w]){re.escape(candidate)}(?![\w])", message.content, re.IGNORECASE):
                     addressed_targets.append(display_name or username)
                     break
 
@@ -1295,7 +1295,7 @@ async def on_message(message):
         if addressed_targets:
             unique_targets = list(dict.fromkeys(name for name in addressed_targets if name))
             target_context = (
-                "\\nThe user is addressing or mentioning: " + ", ".join(unique_targets[:8]) +
+                "\nThe user is addressing or mentioning: " + ", ".join(unique_targets[:8]) +
                 ". Join the conversation naturally and speak to the mentioned person or bot when appropriate. " +
                 "Do not assume they are human; treat them as a normal conversation participant. " +
                 "Do not claim to have sent them a separate message; your reply in this channel is the response."
@@ -1303,7 +1303,7 @@ async def on_message(message):
 
         system_instruction = (
             HERALD_SYSTEM_PROMPT
-            + f"\\nCurrent user's Discord display name: {display_name}. Use it only when it feels natural and useful."
+            + f"\nCurrent user's Discord display name: {display_name}. Use it only when it feels natural and useful."
             + target_context + fam_context + delivery_prompt
         )
 
