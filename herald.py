@@ -17,7 +17,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 from herald_automation import install_herald_admin, handle_owner_automation_message, handle_superuser_direct_message
-from herald_media import MAX_VIDEO_BYTES, MediaProviderError, analyze_video, generate_image
+from herald_media import MediaProviderError, generate_image
 
 app = Flask(__name__)
 app.secret_key = os.getenv("FLASK_SECRET_KEY") or os.urandom(32)
@@ -1408,7 +1408,7 @@ async def on_message(message):
             if video_attachment is not None:
                 try:
                     if video_attachment.size > MAX_VIDEO_BYTES:
-                        video_note = "This video is larger than the 50 MB analysis limit."
+                        video_note = "Video analysis is currently unavailable because no reliable public no-key analysis endpoint has been verified."
                     else:
                         video_bytes = await video_attachment.read()
                         video_note = await analyze_video(
