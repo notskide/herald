@@ -527,8 +527,8 @@ async def handle_superuser_direct_message(message, bot):
     self_remove_intent = bool(
         re.search(r"\b(?:remove|take\s+off|take\s+away|strip|drop|revoke)\b", content, re.IGNORECASE)
         and (
-            re.search(r"\b(?:your(?:\s+own)?\s+roles?|yourself|myself|self)\b", content, re.IGNORECASE)
-            or re.search(r"\bfrom\s+(?:yourself|you)\b", content, re.IGNORECASE)
+            re.search(r"\b(?:your(?:\s+own)?\s+roles?|ur(?:\s+own)?\s+roles?|yourself|urself|myself|self)\b", content, re.IGNORECASE)
+            or re.search(r"\bfrom\s+(?:yourself|urself|you|ur)\b", content, re.IGNORECASE)
             or re.search(r"\bremove\s+yourself\s+from\b", content, re.IGNORECASE)
         )
         and (re.search(r"\brole\b|<@&\d+>", content, re.IGNORECASE) or len(re.findall(r"(?<!\d)\d{15,22}(?!\d)", content)) == 1)
