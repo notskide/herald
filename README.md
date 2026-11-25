@@ -5,7 +5,7 @@ herald is a casual discord bot with server tools, automations, long-term memory,
 ## what's new in 4.4.0
 
 - configured Herald superusers get priority handling for supported instructions and server actions.
-- superusers can generate images with /imagine using Cloudflare FLUX.1 Schnell.
+- superusers can generate images with /imagine using a public Pollinations endpoint (no key or account required).
 - Herald can understand attached photos and analyze attached video clips.
 - the social chat, automations, games, role permissions, and selective memory features remain.
 
