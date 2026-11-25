@@ -22,8 +22,6 @@ herald is a casual discord bot with server tools, automations, long-term memory,
 - provide anti spam alerts, inactivity alerts, goodbye messages, and scheduled announcements.
 - keep an audit history of important server configuration changes.
 - give the configured superusers priority handling for supported requests without running arbitrary code or bypassing Discord permissions.
-- generate images through the superuser-only /imagine command.
-- analyze up to three photos per message and one attached video clip per message.
 
 ## requirements
 
@@ -46,24 +44,6 @@ set these in your hosting provider:
 - `GROQ_API_KEY`: required groq api key. you can provide multiple keys as comma separated values.
 - `FLASK_SECRET_KEY`: a long, random secret for web interface sessions. keep it persistent in production.
 - `PORT`: optional web health check port. defaults to `8080`.
-
-## media features
-
-### Image generation
-
-Use `/imagine prompt:<description>`. For now, only the three IDs in `SUPER_USERS` can use it, so the shared free image quota cannot be consumed by everyone in the server. Herald calls the legacy public Pollinations image endpoint directly, without an API key or account. The service can rate-limit requests or change/disable its endpoint at any time.
-
-### Photos and videos
-
-Attach photos to a message that mentions or replies to Herald, then ask what you want him to inspect. Photo attachments are sent to the configured Groq vision model, with up to three images per message and a 20 MB per-image limit.
-
-Video analysis is currently unavailable because no reliable public no-key analysis endpoint has been verified. Avoid sending private or sensitive photos, or media belonging to someone else without their permission.
-
-start herald:
-
-```sh
-python herald.py
-```
 
 ## discord setup
 
