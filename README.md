@@ -1,14 +1,13 @@
-# herald 4.3.0
+# herald 4.4.0
 
 herald is a casual discord bot with server tools, automations, long-term memory, and a social personality. he's meant to be useful, but also someone people can hang out with.
 
-## what's new in 4.3.0
+## what's new in 4.4.0
 
-- play trivia, riddles, and would-you-rather through /herald game commands.
-- server owners and herald superusers can ask herald to change discord role permissions.
-- role permission changes are also available through /herald role-permissions set.
-- herald publishes the public-facing patch notes in its official server once per release.
-- the social chat, automations, and selective memory features from 4.2.0 remain.
+- configured Herald superusers get priority handling for supported instructions and server actions.
+- superusers can generate images with /imagine using Cloudflare FLUX.1 Schnell.
+- Herald can understand attached photos and analyze attached video clips.
+- the social chat, automations, games, role permissions, and selective memory features remain.
 
 ## what herald can do
 
@@ -22,12 +21,17 @@ herald is a casual discord bot with server tools, automations, long-term memory,
 - let the server owner or a Herald superuser update supported Discord role permissions.
 - provide anti spam alerts, inactivity alerts, goodbye messages, and scheduled announcements.
 - keep an audit history of important server configuration changes.
+- give the configured superusers priority handling for supported requests without running arbitrary code or bypassing Discord permissions.
+- generate images through the superuser-only /imagine command.
+- analyze up to three photos per message and one attached video clip per message.
 
 ## requirements
 
 - python 3.10 or newer.
 - a discord bot application and its token.
 - a groq api key for chat and natural language automation planning.
+- a Cloudflare Workers AI account and API token for image generation.
+- a Google Gemini API key for video analysis. Photo analysis uses the configured Groq vision model.
 
 install the dependencies:
 
@@ -41,8 +45,28 @@ set these in your hosting provider:
 
 - `DISCORD_BOT_TOKEN`: required discord bot token. `DISCORD_TOKEN` also works as a legacy fallback.
 - `GROQ_API_KEY`: required groq api key. you can provide multiple keys as comma separated values.
+- `CLOUDFLARE_ACCOUNT_ID`: Cloudflare account ID used by /imagine. `CF_ACCOUNT_ID` also works.
+- `CLOUDFLARE_API_TOKEN`: Cloudflare API token with Workers AI access. `CF_API_TOKEN` also works.
+- `GEMINI_API_KEY`: Google AI Studio API key for video analysis.
+- `GEMINI_VIDEO_MODEL`: optional Gemini video model override. defaults to `gemini-3.6-flash`.
 - `FLASK_SECRET_KEY`: a long, random secret for web interface sessions. keep it persistent in production.
 - `PORT`: optional web health check port. defaults to `8080`.
+
+## media features
+
+### Image generation
+
+Use `/imagine prompt:<description>`. For now, only the three IDs in `SUPER_USERS` can use it, so the shared free image quota cannot be consumed by everyone in the server. Herald uses Cloudflare Workers AI's `@cf/black-forest-labs/flux-1-schnell` model at four steps. Set both Cloudflare variables above.
+
+Cloudflare's Workers AI free allocation is 10,000 Neurons per account per day; actual image counts depend on output size and model usage. Check the Cloudflare dashboard for the current usage.
+
+### Photos and videos
+
+Attach photos to a message that mentions or replies to Herald, then ask what you want him to inspect. Photo attachments are sent to the configured Groq vision model, with up to three images per message and a 20 MB per-image limit.
+
+Attach one supported video file (up to 50 MB) and ask Herald to summarize it or answer a question about it. Video analysis uses the Gemini Files API and the `gemini-3.6-flash` model by default. Video processing can take longer than normal chat, and fast motion may be missed because the model samples video at about one frame per second.
+
+**Privacy note:** Google's Gemini API free tier may use submitted content to improve its products. Avoid sending private or sensitive photos/videos, or media belonging to someone else without their permission.
 
 start herald:
 
