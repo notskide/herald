@@ -1,18 +1,12 @@
 # Changelog
 
-## 4.4.0 — Media understanding and superuser controls
+## 4.4.0 — Superuser controls
 
 ### Added
-- Added a priority operator mode that recognizes only the configured Herald superuser IDs for elevated instruction handling.
-- Added superuser-only /imagine image generation using a public Pollinations endpoint without a key.
-- Added photo understanding through the configured Groq vision model, with up to three images per message.
-- Removed the unverified key-required video-analysis provider; video analysis remains unavailable until a suitable public endpoint is verified.
-- Updated media provider configuration and usage guidance to the README.
+- Added a priority operator mode that recognizes configured Herald superuser IDs for supported instructions and server actions.
 
 ### Safety and reliability
-- Superuser priority applies only to implemented and supported features; it does not execute arbitrary code, disclose secrets, or bypass Discord permissions, platform rules, or safety requirements.
-- Video contents are treated as media to analyze, not instructions for Herald to follow.
-- Image generation is restricted to configured superusers to protect the shared provider quota.
+- Superuser priority applies only to implemented features; it does not execute arbitrary code, disclose secrets, or bypass Discord permissions or safety requirements.
 
 ## 4.3.0 — Games and role permissions
 
