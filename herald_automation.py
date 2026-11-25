@@ -525,18 +525,31 @@ async def handle_superuser_direct_message(message, bot):
         return True
 
     self_remove_intent = bool(
-        re.search(r"\\b(?:remove|take\\s+off|strip|drop)\\b", content, re.IGNORECASE)
-        and re.search(r"\\b(?:myself|yourself|your own|himself|self)\\b|<@!?\\d+>", content, re.IGNORECASE)
-        and re.search(r"\\brole\\b|<@&\\d+>", content, re.IGNORECASE)
+        re.search(r"\b(?:remove|take\s+off|take\s+away|strip|drop|revoke)\b", content, re.IGNORECASE)
+        and (
+            re.search(r"\b(?:your(?:\s+own)?\s+roles?|yourself|myself|self)\b", content, re.IGNORECASE)
+            or re.search(r"\bfrom\s+(?:yourself|you)\b", content, re.IGNORECASE)
+            or re.search(r"\bremove\s+yourself\s+from\b", content, re.IGNORECASE)
+        )
+        and (re.search(r"\brole\b|<@&\d+>", content, re.IGNORECASE) or len(re.findall(r"(?<!\d)\d{15,22}(?!\d)", content)) == 1)
     )
     if self_remove_intent:
         me = guild.me
-        role_match = re.search(r"<@&(\\d+)>", content) or re.search(
-            r"\\brole(?:\\s+(?:with\\s+)?id)?\\s*[:#]?\\s*(\\d{15,22})", content, re.IGNORECASE
+        role_match = re.search(r"<@&(\d+)>", content) or re.search(
+            r"\brole(?:\s+(?:with\s+)?id)?\s*[:#]?\s*(\d{15,22})\b", content, re.IGNORECASE
         )
-        role = guild.get_role(int(role_match.group(1))) if role_match else next(
-            (candidate for candidate in sorted(guild.roles, key=lambda item: len(item.name), reverse=True)
-             if not candidate.is_default() and not candidate.managed and candidate.name.casefold() in lowered),
+        if role_match is None:
+            numeric_ids = re.findall(r"(?<!\d)(\d{15,22})(?!\d)", content)
+            role_id = numeric_ids[0] if len(numeric_ids) == 1 else None
+        else:
+            role_id = role_match.group(1)
+        role = guild.get_role(int(role_id)) if role_id else next(
+            (
+                candidate for candidate in sorted(guild.roles, key=lambda item: len(item.name), reverse=True)
+                if not candidate.is_default()
+                and not candidate.managed
+                and re.search(rf"(?<![\w]){re.escape(candidate.name.casefold())}(?![\w])", lowered)
+            ),
             None,
         )
         if me is None or not me.guild_permissions.manage_roles:
