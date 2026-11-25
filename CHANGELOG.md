@@ -4,10 +4,10 @@
 
 ### Added
 - Added a priority operator mode that recognizes only the configured Herald superuser IDs for elevated instruction handling.
-- Added superuser-only /imagine image generation using Cloudflare Workers AI FLUX.1 Schnell.
+- Added superuser-only /imagine image generation using a public Pollinations endpoint without a key.
 - Added photo understanding through the configured Groq vision model, with up to three images per message.
-- Added video understanding through the Gemini Files API, with a 50 MB attachment limit and automatic provider-file cleanup.
-- Added media provider configuration and usage guidance to the README.
+- Removed the unverified key-required video-analysis provider; video analysis remains unavailable until a suitable public endpoint is verified.
+- Updated media provider configuration and usage guidance to the README.
 
 ### Safety and reliability
 - Superuser priority applies only to implemented and supported features; it does not execute arbitrary code, disclose secrets, or bypass Discord permissions, platform rules, or safety requirements.
