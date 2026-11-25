@@ -6,7 +6,6 @@ import html
 import traceback
 import random
 import io
-import mimetypes
 from threading import Thread
 
 import aiohttp
@@ -17,7 +16,6 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 from herald_automation import install_herald_admin, handle_owner_automation_message, handle_superuser_direct_message
-from herald_media import MediaProviderError, generate_image
 
 app = Flask(__name__)
 app.secret_key = os.getenv("FLASK_SECRET_KEY") or os.urandom(32)
@@ -136,17 +134,6 @@ def needs_live_web_search(messages):
     return bool(LIVE_SEARCH_PATTERN.search(latest_user_text(messages)))
 
 
-def messages_include_images(messages):
-    for item in messages or []:
-        content = item.get("content") if isinstance(item, dict) else None
-        if isinstance(content, list) and any(
-            isinstance(part, dict) and part.get("type") == "image_url"
-            for part in content
-        ):
-            return True
-    return False
-
-
 def prepare_messages_for_model(messages, model_name, live_search=False):
     """Add strict model-specific rules while preserving Herald's personality and context."""
     prepared = [dict(item) for item in messages]
@@ -254,8 +241,6 @@ guild_settings = load_json(SETTINGS_FILE)
 banned_users = load_list(BANNED_USERS_FILE)
 pending_deliveries = load_json(DELIVERIES_FILE)
 cooling_down_users = set()
-image_generation_last_used = {}
-image_generation_lock = asyncio.Lock()
 # Keep references to background memory tasks so the event loop cannot collect them early.
 background_memory_tasks = set()
 patch_notes_publish_lock = asyncio.Lock()
@@ -748,9 +733,8 @@ def generate_ai_response_sync(messages):
         return "groq api key is missing."
 
     url = "https://api.groq.com/openai/v1/chat/completions"
-    has_images = messages_include_images(messages)
-    live_search = needs_live_web_search(messages) and not has_images
-    model_order = [FALLBACK_MODELS[0]] if has_images else (OPENAI_MODELS if live_search else FALLBACK_MODELS)
+    live_search = needs_live_web_search(messages)
+    model_order = OPENAI_MODELS if live_search else FALLBACK_MODELS
     last_error = None
 
     for model_name in model_order:
@@ -818,9 +802,8 @@ async def generate_ai_response(messages, user_id=None, report_context=None):
         return "i couldn't reach groq: `GROQ_API_KEY` is missing in Render environment variables.", False
 
     url = "https://api.groq.com/openai/v1/chat/completions"
-    has_images = messages_include_images(messages)
-    live_search = needs_live_web_search(messages) and not has_images
-    model_order = [FALLBACK_MODELS[0]] if has_images else (OPENAI_MODELS if live_search else FALLBACK_MODELS)
+    live_search = needs_live_web_search(messages)
+    model_order = OPENAI_MODELS if live_search else FALLBACK_MODELS
     last_error = None
 
     async with aiohttp.ClientSession() as session:
@@ -1027,16 +1010,6 @@ def build_patch_notes_embed():
         title="herald · what's new",
         description=f"**version {PATCH_VERSION}**\nsmall upgrades to make hanging out with Herald better.",
         color=discord.Color.from_rgb(32, 32, 32),
-    )
-    embed.add_field(
-        name="🎨 image generation",
-        value="Configured Herald superusers can generate images with the /imagine command.",
-        inline=False,
-    )
-    embed.add_field(
-        name="📷 photo and video understanding",
-        value="Herald can inspect shared photos and analyze video clips in conversation.",
-        inline=False,
     )
     embed.add_field(
         name="⭐ superuser operator mode",
@@ -1352,42 +1325,6 @@ async def on_message(message):
                 + (f"\nReferenced attachments: {quoted_attachments}" if quoted_attachments else "")
                 + f"\nTheir reply: {message.content}"
             )
-        has_image = False
-        content_payload = [{"type": "text", "text": user_msg_content}]
-        video_attachment = None
-        video_mime_type = None
-        image_count = 0
-        attachment_notes = []
-
-        if message.attachments:
-            for attachment in message.attachments:
-                attachment_mime = (attachment.content_type or "").split(";", 1)[0].strip().lower()
-                if not attachment_mime or attachment_mime == "application/octet-stream":
-                    attachment_mime = mimetypes.guess_type(attachment.filename)[0] or attachment_mime
-                if attachment_mime.startswith("image/"):
-                    if attachment.size > 20 * 1024 * 1024:
-                        attachment_notes.append(f"{attachment.filename} was skipped because images must be 20 MB or smaller.")
-                    elif image_count < 3:
-                        content_payload.append({
-                            "type": "image_url",
-                            "image_url": {"url": attachment.url},
-                        })
-                        image_count += 1
-                        has_image = True
-                elif attachment_mime.startswith("video/") and video_attachment is None:
-                    video_attachment = attachment
-                    video_mime_type = attachment_mime
-
-        if attachment_notes:
-            user_msg_content += "\n\n[Attachment note: " + " ".join(attachment_notes) + "]"
-            content_payload[0]["text"] = user_msg_content
-        if message.attachments and sum(
-            1 for item in message.attachments
-            if ((item.content_type or "").split(";", 1)[0].strip().lower().startswith("video/"))
-        ) > 1:
-            user_msg_content += "\n[Only the first video attachment in this message can be analyzed.]"
-            content_payload[0]["text"] = user_msg_content
-
         print(f"[Herald] Calling Groq for user ID {user_id}.")
         report_context = {
             "message": message.content or "(message had no text; see attachment metadata if present)",
@@ -1405,21 +1342,7 @@ async def on_message(message):
             report_context["message"] += f"\n[Attachments: {attachment_info}]"
         # Keep Discord's typing indicator active while Groq is thinking / trying fallback models.
         async with message.channel.typing():
-            if video_attachment is not None:
-                try:
-                    video_note = "Video analysis is currently unavailable because no reliable public no-key analysis endpoint has been verified."
-                    user_msg_content += "\n\n[Video analysis]\n" + video_note
-                except MediaProviderError as exc:
-                    user_msg_content += f"\n\n[Video analysis unavailable: {exc}]"
-                except Exception as exc:
-                    print(f"[Herald] Video analysis failed: {type(exc).__name__}: {exc}")
-                    user_msg_content += "\n\n[Video analysis failed unexpectedly. Tell the user the clip could not be analyzed.]"
-                content_payload[0]["text"] = user_msg_content
-
-            if has_image:
-                formatted_history.append({"role": "user", "content": content_payload})
-            else:
-                formatted_history.append({"role": "user", "content": user_msg_content})
+            formatted_history.append({"role": "user", "content": user_msg_content})
 
             reply_text, is_error = await generate_ai_response(
                 formatted_history, user_id=message.author.id, report_context=report_context
@@ -1573,45 +1496,6 @@ async def serversettings(interaction: discord.Interaction):
     embed.add_field(name="🗣️ tts voice", value=settings.get("voice", "en-US-ChristopherNeural"), inline=False)
     embed.set_footer(text="use the menu below to update these settings")
     await interaction.response.send_message(embed=embed, view=SettingsView(guild_id), ephemeral=True)
-
-
-@bot.tree.command(name="imagine", description="generate an image with Herald.")
-@app_commands.describe(prompt="describe the image Herald should create")
-async def imagine(interaction: discord.Interaction, prompt: str):
-    if interaction.user.id not in SUPER_USERS:
-        await interaction.response.send_message(
-            "only the configured Herald superusers can use image generation right now.",
-            ephemeral=True,
-        )
-        return
-
-    previous = image_generation_last_used.get(interaction.user.id, 0.0)
-    now = asyncio.get_running_loop().time()
-    remaining = 45 - (now - previous)
-    if remaining > 0:
-        await interaction.response.send_message(
-            f"give me about {round(remaining)} more seconds before generating another image.",
-            ephemeral=True,
-        )
-        return
-
-    image_generation_last_used[interaction.user.id] = now
-    await interaction.response.defer(thinking=True)
-    try:
-        async with image_generation_lock:
-            image_bytes = await generate_image(prompt)
-        await interaction.followup.send(
-            content=f"generated from: {prompt[:350]}",
-            file=discord.File(io.BytesIO(image_bytes), filename="herald-generated.jpg"),
-        )
-    except MediaProviderError as exc:
-        await interaction.followup.send(str(exc)[:1800], ephemeral=True)
-    except Exception as exc:
-        print(f"[Herald] Image generation failed for user {interaction.user.id}: {type(exc).__name__}: {exc}")
-        await interaction.followup.send(
-            f"image generation failed: {type(exc).__name__}: {str(exc)[:700]}",
-            ephemeral=True,
-        )
 
 
 @bot.tree.command(name="speak", description="generate and send a voice audio clip.")
