@@ -30,8 +30,7 @@ herald is a casual discord bot with server tools, automations, long-term memory,
 - python 3.10 or newer.
 - a discord bot application and its token.
 - a groq api key for chat and natural language automation planning.
-- a Cloudflare Workers AI account and API token for image generation.
-- a Google Gemini API key for video analysis. Photo analysis uses the configured Groq vision model.
+- Photo analysis uses the configured Groq vision model. Image generation uses a public endpoint without a key.
 
 install the dependencies:
 
@@ -45,10 +44,6 @@ set these in your hosting provider:
 
 - `DISCORD_BOT_TOKEN`: required discord bot token. `DISCORD_TOKEN` also works as a legacy fallback.
 - `GROQ_API_KEY`: required groq api key. you can provide multiple keys as comma separated values.
-- `CLOUDFLARE_ACCOUNT_ID`: Cloudflare account ID used by /imagine. `CF_ACCOUNT_ID` also works.
-- `CLOUDFLARE_API_TOKEN`: Cloudflare API token with Workers AI access. `CF_API_TOKEN` also works.
-- `GEMINI_API_KEY`: Google AI Studio API key for video analysis.
-- `GEMINI_VIDEO_MODEL`: optional Gemini video model override. defaults to `gemini-3.6-flash`.
 - `FLASK_SECRET_KEY`: a long, random secret for web interface sessions. keep it persistent in production.
 - `PORT`: optional web health check port. defaults to `8080`.
 
@@ -56,17 +51,13 @@ set these in your hosting provider:
 
 ### Image generation
 
-Use `/imagine prompt:<description>`. For now, only the three IDs in `SUPER_USERS` can use it, so the shared free image quota cannot be consumed by everyone in the server. Herald uses Cloudflare Workers AI's `@cf/black-forest-labs/flux-1-schnell` model at four steps. Set both Cloudflare variables above.
-
-Cloudflare's Workers AI free allocation is 10,000 Neurons per account per day; actual image counts depend on output size and model usage. Check the Cloudflare dashboard for the current usage.
+Use `/imagine prompt:<description>`. For now, only the three IDs in `SUPER_USERS` can use it, so the shared free image quota cannot be consumed by everyone in the server. Herald calls the legacy public Pollinations image endpoint directly, without an API key or account. The service can rate-limit requests or change/disable its endpoint at any time.
 
 ### Photos and videos
 
 Attach photos to a message that mentions or replies to Herald, then ask what you want him to inspect. Photo attachments are sent to the configured Groq vision model, with up to three images per message and a 20 MB per-image limit.
 
-Attach one supported video file (up to 50 MB) and ask Herald to summarize it or answer a question about it. Video analysis uses the Gemini Files API and the `gemini-3.6-flash` model by default. Video processing can take longer than normal chat, and fast motion may be missed because the model samples video at about one frame per second.
-
-**Privacy note:** Google's Gemini API free tier may use submitted content to improve its products. Avoid sending private or sensitive photos/videos, or media belonging to someone else without their permission.
+Video analysis is currently unavailable because no reliable public no-key analysis endpoint has been verified. Avoid sending private or sensitive photos, or media belonging to someone else without their permission.
 
 start herald:
 
