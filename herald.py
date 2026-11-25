@@ -1199,15 +1199,16 @@ async def on_message(message):
         return
 
     is_reply_to_herald = False
+    referenced_message = None
     if message.reference:
         if isinstance(message.reference.resolved, discord.Message):
-            is_reply_to_herald = message.reference.resolved.author == bot.user
-        else:
+            referenced_message = message.reference.resolved
+        elif message.reference.message_id:
             try:
                 referenced_message = await message.channel.fetch_message(message.reference.message_id)
-                is_reply_to_herald = referenced_message.author == bot.user
             except Exception:
-                is_reply_to_herald = False
+                referenced_message = None
+        is_reply_to_herald = bool(referenced_message and bot.user and referenced_message.author.id == bot.user.id)
 
     is_mentioned = bot.user is not None and bot.user.mentioned_in(message)
     is_about_herald = "herald" in message.content.lower()
@@ -1311,6 +1312,16 @@ async def on_message(message):
         formatted_history.extend(history)
         formatted_history.extend(recent_channel_context)
         user_msg_content = f"{display_name}: {message.content}"
+        if is_reply_to_herald and referenced_message:
+            quoted_author = getattr(referenced_message.author, "display_name", referenced_message.author.name)
+            quoted_content = referenced_message.content or "(no text content)"
+            quoted_attachments = " ".join(attachment.url for attachment in referenced_message.attachments)
+            user_msg_content = (
+                f"{display_name} replied to Herald's message.\n"
+                f"Herald's referenced message from {quoted_author}: {quoted_content}"
+                + (f"\nReferenced attachments: {quoted_attachments}" if quoted_attachments else "")
+                + f"\nTheir reply: {message.content}"
+            )
         has_image = False
         content_payload = [{"type": "text", "text": user_msg_content}]
 
