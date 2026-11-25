@@ -1407,16 +1407,7 @@ async def on_message(message):
         async with message.channel.typing():
             if video_attachment is not None:
                 try:
-                    if video_attachment.size > MAX_VIDEO_BYTES:
-                        video_note = "Video analysis is currently unavailable because no reliable public no-key analysis endpoint has been verified."
-                    else:
-                        video_bytes = await video_attachment.read()
-                        video_note = await analyze_video(
-                            video_bytes,
-                            video_mime_type,
-                            video_attachment.filename,
-                            message.content,
-                        )
+                    video_note = "Video analysis is currently unavailable because no reliable public no-key analysis endpoint has been verified."
                     user_msg_content += "\n\n[Video analysis]\n" + video_note
                 except MediaProviderError as exc:
                     user_msg_content += f"\n\n[Video analysis unavailable: {exc}]"
