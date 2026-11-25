@@ -1217,27 +1217,16 @@ async def on_message(message):
     addressed_targets = []
     if message.guild:
         mentioned_ids = {member.id for member in message.mentions}
-        for member in message.guild.members:
-            if member.id == getattr(bot.user, "id", None):
-                continue
-            display_name = str(member.display_name or "").strip()
-            username = str(member.name or "").strip()
-            if member.id in mentioned_ids:
-                addressed_targets.append(display_name or username)
-                continue
-            for candidate in {display_name, username}:
-                if len(candidate) < 3:
-                    continue
-                if re.search(rf"(?<![\w]){re.escape(candidate)}(?![\w])", message.content, re.IGNORECASE):
-                    addressed_targets.append(display_name or username)
-                    break
+        for member in message.mentions:
+            if member.id != getattr(bot.user, "id", None):
+                addressed_targets.append(member.display_name or member.name)
 
     is_addressed_to_other = bool(addressed_targets)
 
     if message.author.bot and not (is_mentioned or is_reply_to_herald):
         return
 
-    if not (is_reply_to_herald or is_mentioned or is_about_herald or is_dm or is_addressed_to_other):
+    if not (is_reply_to_herald or is_mentioned or is_about_herald or is_dm):
         return
 
     if message.mentions and message.guild:
