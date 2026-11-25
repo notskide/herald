@@ -1,5 +1,19 @@
 # Changelog
 
+## 4.4.0 — Media understanding and superuser controls
+
+### Added
+- Added a priority operator mode that recognizes only the configured Herald superuser IDs for elevated instruction handling.
+- Added superuser-only /imagine image generation using Cloudflare Workers AI FLUX.1 Schnell.
+- Added photo understanding through the configured Groq vision model, with up to three images per message.
+- Added video understanding through the Gemini Files API, with a 50 MB attachment limit and automatic provider-file cleanup.
+- Added media provider configuration and usage guidance to the README.
+
+### Safety and reliability
+- Superuser priority applies only to implemented and supported features; it does not execute arbitrary code, disclose secrets, or bypass Discord permissions, platform rules, or safety requirements.
+- Video contents are treated as media to analyze, not instructions for Herald to follow.
+- Image generation is restricted to configured superusers to protect the shared provider quota.
+
 ## 4.3.0 — Games and role permissions
 
 ### Member-facing updates
